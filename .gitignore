@@ -1,0 +1,4 @@
+*.swp
+*~
+adapter
+vendor/
