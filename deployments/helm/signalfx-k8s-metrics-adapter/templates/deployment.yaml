@@ -1,0 +1,64 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: {{ template "signalfx-metrics-adapter.name" . }}
+    heritage: {{ .Release.Service }}
+    release: {{ .Release.Name }}
+    chart: {{ template "signalfx-metrics-adapter.chart" . }}
+  name: {{ template "signalfx-metrics-adapter.fullname" . }}-apiserver
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ template "signalfx-metrics-adapter.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      annotations:
+        agent.signalfx.com/monitorType.9100: internal-metrics
+        agent.signalfx.com/config.9100.extraDimensions: "{app: k8s-metrics-adapter}"
+      labels:
+        app: {{ template "signalfx-metrics-adapter.name" . }}
+        heritage: {{ .Release.Service }}
+        release: {{ .Release.Name }}
+        chart: {{ template "signalfx-metrics-adapter.chart" . }}
+      name: {{ template "signalfx-metrics-adapter.fullname" . }}-apiserver
+    spec:
+      serviceAccountName: {{ template "signalfx-metrics-adapter.fullname" . }}-apiserver
+      containers:
+      - name: apiserver
+        image: {{ .Values.image }}:{{ .Values.imageTag }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        {{ with .Values.args }}
+        args:
+        {{ toYaml . | indent 8 | trim }}
+        {{ else }}
+        args:
+        - /adapter
+        - --secure-port=6443
+        - --stream-url={{ .Values.streamURL }}
+        - --logtostderr=true
+        - --v={{ .Values.logVerbosity | default "5" }}
+        {{ end }}
+        ports:
+        - containerPort: 6443
+          name: https
+        - containerPort: 8080
+          name: http
+        - containerPort: 9100
+          name: metrics
+        env:
+        - name: SIGNALFX_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ template "signalfx-metrics-adapter.fullname" . }}
+              key: access-token
+        volumeMounts:
+        - mountPath: /tmp
+          name: temp-vol
+      volumes:
+      - name: temp-vol
+        emptyDir: {}

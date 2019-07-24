@@ -1,0 +1,16 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ template "signalfx-metrics-adapter.fullname" . }}-server-resources
+  labels:
+    app: {{ template "signalfx-metrics-adapter.name" . }}
+    heritage: {{ .Release.Service }}
+    release: {{ .Release.Name }}
+    chart: {{ template "signalfx-metrics-adapter.chart" . }}
+rules:
+- apiGroups:
+  - custom.metrics.k8s.io
+  - external.metrics.k8s.io
+  resources: ["*"]
+  verbs: ["*"]
