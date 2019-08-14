@@ -1,0 +1,19 @@
+---
+apiVersion: apiregistration.k8s.io/v1beta1
+kind: APIService
+metadata:
+  name: v1beta2.custom.metrics.k8s.io
+  labels:
+    app: {{ template "signalfx-metrics-adapter.name" . }}
+    heritage: {{ .Release.Service }}
+    release: {{ .Release.Name }}
+    chart: {{ template "signalfx-metrics-adapter.chart" . }}
+spec:
+  service:
+    name: {{ template "signalfx-metrics-adapter.fullname" . }}-apiserver
+    namespace: {{ .Release.Namespace }}
+  group: custom.metrics.k8s.io
+  version: v1beta2
+  insecureSkipTLSVerify: true
+  groupPriorityMinimum: 100
+  versionPriority: 200

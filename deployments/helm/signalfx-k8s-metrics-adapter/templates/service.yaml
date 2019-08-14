@@ -1,0 +1,21 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "signalfx-metrics-adapter.fullname" . }}-apiserver
+  labels:
+    app: {{ template "signalfx-metrics-adapter.name" . }}
+    heritage: {{ .Release.Service }}
+    release: {{ .Release.Name }}
+    chart: {{ template "signalfx-metrics-adapter.chart" . }}
+spec:
+  ports:
+  - name: https
+    port: 443
+    targetPort: 6443
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: {{ template "signalfx-metrics-adapter.name" . }}
+    release: {{ .Release.Name }}

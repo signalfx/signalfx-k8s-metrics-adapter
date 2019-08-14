@@ -1,0 +1,18 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ template "signalfx-metrics-adapter.fullname" . }}-resource-reader
+  labels:
+    app: {{ template "signalfx-metrics-adapter.name" . }}
+    heritage: {{ .Release.Service }}
+    release: {{ .Release.Name }}
+    chart: {{ template "signalfx-metrics-adapter.chart" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ template "signalfx-metrics-adapter.fullname" . }}-resource-reader
+subjects:
+- kind: ServiceAccount
+  name: {{ template "signalfx-metrics-adapter.fullname" . }}-apiserver
+  namespace: {{ .Release.Namespace }}
