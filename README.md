@@ -5,6 +5,8 @@ This is a custom metrics adapter that allows using SignalFx metrics in a
 Autoscaler (HPA)](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/).
 It currently supports both HPAs attached to Deployments and Stateful Sets.
 
+**This is currently in beta and has not been thoroughly tested in production environments yet. Use with caution.**
+
 It supports both _custom_ and _external_ metrics.  It pulls the metrics from
 the SignalFx backend using the [SignalFlow Go client
 library](https://github.com/signalfx/signalfx-go/tree/master/signalflow).
