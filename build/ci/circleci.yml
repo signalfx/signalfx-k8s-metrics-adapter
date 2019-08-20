@@ -1,0 +1,167 @@
+---
+version: 2.1
+executors:
+  machine_image:
+    machine:
+      image: ubuntu-1604:201903-01
+
+  docker1809:
+    docker:
+      - image: docker:18.09
+
+  helm:
+    docker:
+     - image: alpine/helm:2.13.0
+
+commands:
+  import_image:
+    description: Import the agent image archive from the build job.
+    steps:
+      - attach_workspace:
+          at: /tmp/workspace
+      - run:
+          name: Load agent image
+          command: |
+            [ -f ~/.skip ] && echo "Found ~/.skip, skipping docker image load!" && exit 0
+            docker load -i /tmp/workspace/image.tar
+
+  save_test_results:
+    description: Collect and archive test results from `dir`.
+    parameters:
+      dir:
+        type: string
+        default: "~/testresults"
+    steps:
+      - store_test_results:
+          path: << parameters.dir >>
+      - store_artifacts:
+          path: << parameters.dir >>
+
+  install_kubectl:
+    parameters:
+      version:
+        type: string
+        default: v1.12.0
+    steps:
+      - restore_cache:
+          key: "v1-kubectl-binary-<< parameters.version >>"
+      - run:
+          name: Install kubectl
+          command: |
+            [[ -f /home/circleci/bin/kubectl ]] && exit 0
+            wget -O /home/circleci/bin/kubectl https://storage.googleapis.com/kubernetes-release/release/<< parameters.version >>/bin/linux/amd64/kubectl
+            chmod a+x /home/circleci/bin/kubectl
+      - save_cache:
+          key: "v1-kubectl-binary-<< parameters.version >>"
+          paths:
+            - /home/circleci/bin/kubectl
+
+  install_crictl:
+    parameters:
+      version:
+        type: string
+        default: v1.12.0
+    steps:
+      - restore_cache:
+          key: "v1-crictl-binary-<< parameters.version >>"
+      - run:
+          name: Install crictl
+          command: |
+            [[ -f /home/circleci/bin/crictl ]] && exit 0
+            wget -O /tmp/crictl.tar.gz https://github.com/kubernetes-incubator/cri-tools/releases/download/<< parameters.version >>/crictl-<< parameters.version >>-linux-amd64.tar.gz
+            tar -zxvf /tmp/crictl.tar.gz -C /home/circleci/bin/
+            chmod a+x /home/circleci/bin/crictl
+      - save_cache:
+          key: "v1-crictl-binary-<< parameters.version >>"
+          paths:
+            - /home/circleci/bin/crictl
+
+  install_minikube:
+    parameters:
+      version:
+        type: string
+        default: v1.3.1
+    steps:
+      - restore_cache:
+          key: "v1-minikube-binary-<< parameters.version >>"
+      - run:
+          name: Install minikube
+          command: |
+            [[ -f /home/circleci/bin/minikube ]] && exit 0
+            wget -O /home/circleci/bin/minikube https://storage.googleapis.com/minikube/releases/<< parameters.version >>/minikube-linux-amd64
+            chmod a+x /home/circleci/bin/minikube
+      - save_cache:
+          key: "v1-minikube-binary-<< parameters.version >>"
+          paths:
+            - /home/circleci/bin/minikube
+
+jobs:
+  build_image:
+    executor: docker1809
+    environment:
+      REGISTRY: quay.io/signalfx
+      IMAGE: k8s-metrics-adapter
+      VERSION: latest
+    steps:
+      - checkout
+      - setup_remote_docker:
+          docker_layer_caching: false
+      - run: |
+          PUSH=no make image
+      - run: |
+          mkdir -p /tmp/workspace
+          docker save -o /tmp/workspace/image.tar ${REGISTRY}/${IMAGE}:${VERSION}
+      - persist_to_workspace:
+          root: /tmp/workspace
+          paths:
+            - image.tar
+
+  helm_lint:
+    executor: helm
+    steps:
+      - checkout
+      - run: |
+          helm lint ./deployments/helm/signalfx-k8s-metrics-adapter || \
+          (echo 'Helm lint issues found!' && exit 1)
+
+  k8s_tests:
+    executor: machine_image
+    parameters:
+      k8s_version:
+        type: string
+        default: v1.12.0
+    environment:
+      MINIKUBE_IN_STYLE: "false"
+      MINIKUBE_WANTUPDATENOTIFICATION: "false"
+      MINIKUBE_WANTREPORTERRORPROMPT: "false"
+      CHANGE_MINIKUBE_NONE_USER: "true"
+    steps:
+      - checkout
+      - install_kubectl:
+          version: << parameters.k8s_version >>
+      - install_crictl
+      - install_minikube
+      - run:
+          name: Start minikube
+          command: |
+            sudo "PATH=$PATH:/home/circleci/bin" -E minikube start --vm-driver=none --wait=true --kubernetes-version=<< parameters.k8s_version >>
+      - run:
+          name: Run tests
+          command: |
+            mkdir ~/testresults
+            kubectl config view --raw > kubeconfig
+            docker build -t adapter-test -f Dockerfile.test .
+            docker run -v $HOME/.minikube:$HOME/.minikube -e KUBECONFIG=/code/kubeconfig adapter-test | tee ~/testresults/results.xml
+      - save_test_results
+
+workflows:
+  build_test:
+    jobs:
+      - build_image
+      - helm_lint
+      - k8s_tests:
+          name: k8s_v1.12.0_tests
+          k8s_version: v1.12.0
+      - k8s_tests:
+          name: k8s_v1.15.0_tests
+          k8s_version: v1.15.0

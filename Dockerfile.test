@@ -1,0 +1,13 @@
+FROM golang:1.12.1-alpine
+
+ENV KUBECONFIG=/code/kubeconfig
+
+RUN apk add bash git make
+
+COPY ./ /code
+
+RUN cd /tmp && \
+    GO111MODULE=on go get github.com/tebeka/go2xunit
+
+WORKDIR /code
+CMD bash -Eeo pipefail -c "make -s test | tee /dev/stderr | go2xunit"
