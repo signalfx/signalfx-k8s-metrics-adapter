@@ -2,6 +2,7 @@ package internal
 
 import (
 	"sync/atomic"
+	"time"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -65,11 +66,11 @@ func (p *SignalFxProvider) GetMetricByName(name types.NamespacedName, info provi
 		klog.Errorf("Error getting latest metric snapshot for metric %v: %v", spew.Sdump(keyMetric), err)
 		return nil, provider.NewMetricNotFoundForError(info.GroupResource, info.Metric, name.Name)
 	}
-	if len(snapshot.TSIDValueMetadatas) == 0 {
+	if len(snapshot) == 0 {
 		return nil, provider.NewMetricNotFoundForError(info.GroupResource, info.Metric, name.Name)
 	}
-	if len(snapshot.TSIDValueMetadatas) > 1 {
-		klog.Errorf("expected one value for metric %v and got %d, using first one.", spew.Sdump(keyMetric), len(snapshot.TSIDValueMetadatas))
+	if len(snapshot) > 1 {
+		klog.Errorf("expected one value for metric %v and got %d, using first one.", spew.Sdump(keyMetric), len(snapshot))
 	}
 
 	gvk, err := p.mapper.KindFor(schema.GroupVersionResource{
@@ -80,8 +81,16 @@ func (p *SignalFxProvider) GetMetricByName(name types.NamespacedName, info provi
 		klog.Errorf("Could not derive kind for %v", info.GroupResource)
 	}
 
+	var val float64
+	var ts time.Time
+	// Grab the first one since there is only one
+	for _, valueMetadata := range snapshot {
+		val = valueMetadata.Val
+		ts = valueMetadata.Timestamp
+	}
+
 	out := custom_metrics.MetricValue{
-		Timestamp: metav1.Time{Time: snapshot.Timestamp},
+		Timestamp: metav1.Time{Time: ts},
 		DescribedObject: custom_metrics.ObjectReference{
 			Kind:       gvk.Kind,
 			APIVersion: gvk.Version,
@@ -91,7 +100,7 @@ func (p *SignalFxProvider) GetMetricByName(name types.NamespacedName, info provi
 		Metric: custom_metrics.MetricIdentifier{
 			Name: info.Metric,
 		},
-		Value: *resource.NewMilliQuantity(int64(snapshot.TSIDValueMetadatas[0].Val*1000), resource.DecimalSI),
+		Value: *resource.NewMilliQuantity(int64(val*1000), resource.DecimalSI),
 	}
 
 	klog.V(5).Infof("GetMetricByName(%v, %v, %v) -> %v", name, info, metricSelector, out)
@@ -134,9 +143,9 @@ func (p *SignalFxProvider) GetMetricBySelector(namespace string, selector labels
 	}
 
 	var out custom_metrics.MetricValueList
-	for _, tvm := range snapshot.TSIDValueMetadatas {
+	for _, tvm := range snapshot {
 		out.Items = append(out.Items, custom_metrics.MetricValue{
-			Timestamp: metav1.Time{Time: snapshot.Timestamp},
+			Timestamp: metav1.Time{Time: tvm.Timestamp},
 			DescribedObject: custom_metrics.ObjectReference{
 				Kind:       gvk.Kind,
 				APIVersion: gvk.Version,
@@ -181,9 +190,9 @@ func (p *SignalFxProvider) GetExternalMetric(namespace string, metricSelector la
 	}
 
 	out := []external_metrics.ExternalMetricValue{}
-	for _, tvm := range snapshot.TSIDValueMetadatas {
+	for _, tvm := range snapshot {
 		out = append(out, external_metrics.ExternalMetricValue{
-			Timestamp:    metav1.Time{Time: snapshot.Timestamp},
+			Timestamp:    metav1.Time{Time: tvm.Timestamp},
 			MetricName:   info.Metric,
 			MetricLabels: nil,
 			Value:        *resource.NewMilliQuantity(int64(tvm.Val*1000), resource.DecimalSI),

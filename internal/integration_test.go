@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"testing"
 	"time"
 
@@ -111,6 +112,7 @@ func providerWithBackend(t *testing.T) (*SignalFxProvider, kubernetes.Interface,
 	client, _ := backend.Client()
 
 	jobRunner := NewSignalFlowJobRunner(client)
+	jobRunner.CleanupOldTSIDsInterval = 2 * time.Second
 	go jobRunner.Run(ctx)
 
 	registry := NewRegistry(jobRunner)
@@ -217,9 +219,8 @@ func TestPodMetrics(t *testing.T) {
 	}
 	require.Contains(t, metricList, expectedCustomMetricInfo)
 
-	var metrics *custom_metrics.MetricValueList
-	waitFor(5*time.Second, func() bool {
-		metrics, err = prov.GetMetricBySelector(
+	get := func(metric string) (*custom_metrics.MetricValueList, error) {
+		return prov.GetMetricBySelector(
 			testNamespace,
 			forceLabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -227,16 +228,25 @@ func TestPodMetrics(t *testing.T) {
 				},
 			}),
 			provider.CustomMetricInfo{
-				Metric: "jobs_queued",
+				Metric: metric,
 				GroupResource: schema.GroupResource{
 					Resource: "pods",
 				}},
 			nil)
+	}
+
+	var metrics *custom_metrics.MetricValueList
+	waitFor(5*time.Second, func() bool {
+		metrics, err = get("jobs_queued")
 		return err == nil && len(metrics.Items) > 0 && fakeSignalFlow.RunningJobsForProgram(expectedProgram) == 1
 	})
 	require.Nil(t, err)
 
 	require.Len(t, metrics.Items, 2)
+	sort.Slice(metrics.Items, func(i, j int) bool {
+		return metrics.Items[i].DescribedObject.Name < metrics.Items[j].DescribedObject.Name
+	})
+
 	require.Equal(t, metrics.Items[0].Metric, custom_metrics.MetricIdentifier{
 		Name: "jobs_queued",
 	})
@@ -290,19 +300,7 @@ func TestPodMetrics(t *testing.T) {
 	}))
 
 	waitFor(5*time.Second, func() bool {
-		metrics, err = prov.GetMetricBySelector(
-			testNamespace,
-			forceLabelSelector(&metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "queue",
-				},
-			}),
-			provider.CustomMetricInfo{
-				Metric: "jobs_processed",
-				GroupResource: schema.GroupResource{
-					Resource: "pods",
-				}},
-			nil)
+		metrics, err = get("jobs_processed")
 		return err == nil && len(metrics.Items) > 0 && fakeSignalFlow.RunningJobsForProgram(expectedProgram) == 1
 	})
 	require.Nil(t, err)
@@ -337,6 +335,14 @@ func TestPodMetrics(t *testing.T) {
 	}
 	metricList = prov.ListAllMetrics()
 	require.Contains(t, metricList, expectedCustomMetricInfo)
+
+	fakeSignalFlow.RemoveTSIDData(tsids[0])
+
+	require.True(t, waitFor(10*time.Second, func() bool {
+		metrics, err = get("jobs_processed")
+		return len(metrics.Items) == 1
+	}))
+	require.Nil(t, err)
 
 	// DELETE THE HPA
 
@@ -870,6 +876,10 @@ func TestMultipleHPAs(t *testing.T) {
 		require.Nil(t, err)
 
 		require.Len(t, metrics.Items, 2)
+		sort.Slice(metrics.Items, func(i, j int) bool {
+			return metrics.Items[i].DescribedObject.Name < metrics.Items[j].DescribedObject.Name
+		})
+
 		require.Equal(t, metrics.Items[0].Metric, custom_metrics.MetricIdentifier{
 			Name: "jobs_queued",
 		})

@@ -16,18 +16,16 @@ import (
 )
 
 type TSIDValueMetadata struct {
-	TSID     idtool.ID
-	Val      float64
-	Metadata *messages.MetadataProperties
+	TSID       idtool.ID
+	Val        float64
+	Metadata   *messages.MetadataProperties
+	Timestamp  time.Time
+	Resolution time.Duration
 }
 
 // MetricSnapshot represents the latest state of received metric data from a
 // SignalFlow job.
-type MetricSnapshot struct {
-	TSIDValueMetadatas []*TSIDValueMetadata
-	Timestamp          time.Time
-	Resolution         time.Duration
-}
+type MetricSnapshot map[idtool.ID]*TSIDValueMetadata
 
 // PodNameForTSID returns the pod name that is associated with the given TSID,
 // if any.
@@ -51,7 +49,7 @@ type dataRequest struct {
 }
 
 type dataResponse struct {
-	snapshot *MetricSnapshot
+	snapshot MetricSnapshot
 	err      error
 }
 
@@ -69,12 +67,14 @@ type SignalFlowJobRunner struct {
 
 	jobsByProgram           map[string]*signalflow.Computation
 	jobsByHandle            map[string]*signalflow.Computation
-	metricSnapshotsByHandle map[string]*MetricSnapshot
+	metricSnapshotsByHandle map[string]MetricSnapshot
 
 	startedCh     chan startedMsg
 	stoppedCh     chan string
 	dataCh        chan newDataMsg
 	dataRequestCh chan dataRequest
+
+	CleanupOldTSIDsInterval time.Duration
 
 	TotalJobsStarted int64
 	TotalJobsStopped int64
@@ -86,11 +86,12 @@ func NewSignalFlowJobRunner(client *signalflow.Client) *SignalFlowJobRunner {
 		client:                  client,
 		jobsByProgram:           make(map[string]*signalflow.Computation),
 		jobsByHandle:            make(map[string]*signalflow.Computation),
-		metricSnapshotsByHandle: make(map[string]*MetricSnapshot),
+		metricSnapshotsByHandle: make(map[string]MetricSnapshot),
 		startedCh:               make(chan startedMsg),
 		stoppedCh:               make(chan string),
 		dataCh:                  make(chan newDataMsg),
 		dataRequestCh:           make(chan dataRequest),
+		CleanupOldTSIDsInterval: 30 * time.Second,
 	}
 }
 
@@ -117,7 +118,7 @@ func (jr *SignalFlowJobRunner) ReplaceOrStartJob(program string) error {
 		program: program,
 	}
 
-	klog.Infof("Started SignalFlow compuation: %s (%s)", program, handle)
+	klog.Infof("Started SignalFlow compuation: %s (handle: %s)", program, handle)
 	atomic.AddInt64(&jr.TotalJobsStarted, 1)
 
 	go jr.watchJob(comp, program)
@@ -135,10 +136,13 @@ func (jr *SignalFlowJobRunner) StopJob(program string) {
 func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 	jr.ctx = ctx
 
+	cleanupTicker := time.NewTicker(jr.CleanupOldTSIDsInterval)
+
 	for {
 		select {
 
 		case <-jr.ctx.Done():
+			cleanupTicker.Stop()
 			klog.Infof("SignalFlow job runner is stopping")
 			return
 
@@ -167,7 +171,7 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 		case data := <-jr.dataCh:
 			snapshot := jr.metricSnapshotsByHandle[data.handle]
 			if snapshot == nil {
-				snapshot = &MetricSnapshot{}
+				snapshot = make(MetricSnapshot)
 				jr.metricSnapshotsByHandle[data.handle] = snapshot
 			}
 
@@ -177,7 +181,6 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 				continue
 			}
 
-			snapshot.TSIDValueMetadatas = nil
 			for _, payload := range data.msg.Payloads {
 				var val float64
 				switch v := payload.Value().(type) {
@@ -189,14 +192,14 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 					klog.Errorf("Metric from %v has unexpected type", data)
 					continue
 				}
-				snapshot.TSIDValueMetadatas = append(snapshot.TSIDValueMetadatas, &TSIDValueMetadata{
-					TSID:     payload.TSID,
-					Val:      val,
-					Metadata: comp.TSIDMetadata(payload.TSID),
-				})
+				snapshot[payload.TSID] = &TSIDValueMetadata{
+					TSID:       payload.TSID,
+					Val:        val,
+					Metadata:   comp.TSIDMetadata(payload.TSID),
+					Timestamp:  data.msg.Timestamp(),
+					Resolution: data.resolution,
+				}
 			}
-			snapshot.Timestamp = data.msg.Timestamp()
-			snapshot.Resolution = data.resolution
 
 		case dataReq := <-jr.dataRequestCh:
 			comp := jr.jobsByProgram[dataReq.program]
@@ -209,6 +212,23 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 			dataReq.respCh <- dataResponse{
 				snapshot: jr.metricSnapshotsByHandle[comp.Handle()],
 				err:      nil,
+			}
+		case <-cleanupTicker.C:
+			now := time.Now()
+			// Cleanup all of the tsids that haven't reported data for a while.
+			for handle := range jr.metricSnapshotsByHandle {
+				snapshot := jr.metricSnapshotsByHandle[handle]
+				for tsid := range snapshot {
+					meta := snapshot[tsid]
+					expiry := jr.CleanupOldTSIDsInterval
+					if meta.Resolution != 0 {
+						expiry = meta.Resolution * 3
+					}
+					if now.Sub(meta.Timestamp) > expiry {
+						delete(snapshot, tsid)
+						klog.V(5).Infof("Cleaning up old TSID %s from computation with handle %s", tsid, handle)
+					}
+				}
 			}
 		}
 	}
@@ -257,7 +277,7 @@ func (jr *SignalFlowJobRunner) InternalMetrics() []*datapoint.Datapoint {
 	}
 }
 
-func (jr *SignalFlowJobRunner) LatestSnapshot(m *HPAMetric) (*MetricSnapshot, error) {
+func (jr *SignalFlowJobRunner) LatestSnapshot(m *HPAMetric) (MetricSnapshot, error) {
 	// Give it a buffer of one so that the main loop doesn't have to block
 	// sending back the response
 	respCh := make(chan dataResponse, 1)
