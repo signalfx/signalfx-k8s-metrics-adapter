@@ -100,7 +100,7 @@ func (r *Registry) HPAMetricMatchingKey(m *HPAMetric) *HPAMetric {
 	return r.metricsByKey[m.Key()]
 }
 
-func (r *Registry) LatestSnapshot(m *HPAMetric) (*MetricSnapshot, error) {
+func (r *Registry) LatestSnapshot(m *HPAMetric) (MetricSnapshot, error) {
 	return r.jobRunner.LatestSnapshot(m)
 }
 

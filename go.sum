@@ -252,6 +252,10 @@ github.com/signalfx/signalfx-go v1.5.1-0.20190811203807-25aad08a096f h1:whMfU2OW
 github.com/signalfx/signalfx-go v1.5.1-0.20190811203807-25aad08a096f/go.mod h1:0Q0eueMWMC8r+jq+LJIGrspzvLF+hpWO9cggHlSpwVs=
 github.com/signalfx/signalfx-go v1.5.1 h1:bsxqPwDiYrREOYoORu6OLPhi604voYaJGFsU63rgVI0=
 github.com/signalfx/signalfx-go v1.5.1/go.mod h1:0Q0eueMWMC8r+jq+LJIGrspzvLF+hpWO9cggHlSpwVs=
+github.com/signalfx/signalfx-go v1.6.2-0.20190829183319-2a560a6947b9 h1:Y0FDlIGpRTVy/J/vvZ0RC0uY1N3O7v6Yepki90JOEIM=
+github.com/signalfx/signalfx-go v1.6.2-0.20190829183319-2a560a6947b9/go.mod h1:0Q0eueMWMC8r+jq+LJIGrspzvLF+hpWO9cggHlSpwVs=
+github.com/signalfx/signalfx-go v1.6.2-0.20190829204208-2874a19e3897 h1:QQ2OW7S4OXwab/NC/TbWmT8V9vlxflTub07YUvIBKbc=
+github.com/signalfx/signalfx-go v1.6.2-0.20190829204208-2874a19e3897/go.mod h1:0Q0eueMWMC8r+jq+LJIGrspzvLF+hpWO9cggHlSpwVs=
 github.com/sirupsen/logrus v1.2.0 h1:juTguoYk5qI21pwyTXY3B3Y5cOTH3ZUyZCg1v/mihuo=
 github.com/sirupsen/logrus v1.2.0/go.mod h1:LxeOpSwHxABJmUn/MG1IvRgCAasNZTLOkJPxbbu5VWo=
 github.com/sirupsen/logrus v1.4.2 h1:SPIRibHv4MatM3XXNO2BJeFLZwZ2LvZgfQ5+UNI2im4=
