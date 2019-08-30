@@ -10,7 +10,7 @@ adapter:
 	CGO_ENABLED=0 GOARCH=$(ARCH) go build -o ./adapter ./cmd/adapter
 
 test:
-	CGO_ENABLED=0 go test ./cmd/... ./internal/...
+	CGO_ENABLED=0 go test -v ./cmd/... ./internal/...
 
 image:
 	docker build -t $(REGISTRY)/$(IMAGE):$(VERSION) .
