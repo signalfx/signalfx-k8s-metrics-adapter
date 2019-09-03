@@ -49,7 +49,7 @@ require (
 	github.com/signalfx/com_signalfx_metrics_protobuf v0.0.0-20190530013331-054be550cb49 // indirect
 	github.com/signalfx/gohistogram v0.0.0-20160107210732-1ccfd2ff5083 // indirect
 	github.com/signalfx/golib v2.4.0+incompatible
-	github.com/signalfx/signalfx-go v1.6.2-0.20190829204208-2874a19e3897
+	github.com/signalfx/signalfx-go v1.6.2-0.20190903173353-70392318edd4
 	github.com/sirupsen/logrus v1.4.2 // indirect
 	github.com/soheilhy/cmux v0.1.4 // indirect
 	github.com/spf13/pflag v1.0.3 // indirect
