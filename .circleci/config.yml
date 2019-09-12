@@ -128,7 +128,7 @@ commands:
         default: v1.12.0
       options:
         type: string
-        default: --vm-driver=none --wait=true --kubernetes-version=<< parameters.k8s_version >> --extra-config=kubeadm.ignore-preflight-errors=FileExisting-crictl
+        default: --extra-config=kubeadm.ignore-preflight-errors=FileExisting-crictl
     steps:
       - install_kubectl:
           version: << parameters.k8s_version >>
@@ -142,7 +142,7 @@ commands:
             MINIKUBE_WANTREPORTERRORPROMPT: "false"
             CHANGE_MINIKUBE_NONE_USER: "true"
           command: |
-            sudo "PATH=$PATH" -E /home/circleci/bin/minikube start << parameters.options >>
+            sudo "PATH=$PATH" -E /home/circleci/bin/minikube start --vm-driver=none --wait=true --kubernetes-version=<< parameters.k8s_version >> << parameters.options >>
 
 jobs:
   build_image:
