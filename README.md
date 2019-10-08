@@ -158,14 +158,31 @@ This adapter should be installed within the cluster that you want to use it
 for.  It can go in any namespace, as it serves metrics across the entire
 cluster.
 
-The simplest way to install is via the [Helm Chart](./deploy/helm/signalfx-k8s-metrics-adatper).
+The simplest way to install is via the [Helm Chart](./deployments/helm/signalfx-k8s-metrics-adatper).
+
+#### Configuring the stream endpoint
+
+In order for the adapter to communicate with SignalFx, we need to make sure you connect to the correct SignalFx realm.
+To determine what realm you are in, check your profile page in the SignalFx web application (click the avatar in the upper right and click My Profile).
+
+If you are not in the `us0` realm, you will need to configure the `streamURL` configuration option shown below to include your realm in the URL when installing the adapter:
+
+`streamURL: wss://stream.<REALM>.signalfx.com/v2/signalflow`
+
+
+If you are running this as a standalone app, not installed via helm, you can pass the the realm in as a command line argument when starting the adapter:
+
+`./adapter --signalfx-realm us0`
+or
+`./adapter --stream-url wss://stream.<REALM>.signalfx.com/v2/signalflow`
+
 
 ## Development
 
 To run the server locally against a K8s cluster you have configured in a local
 kubeconfig file:
 
-`./adapter --lister-kubeconfig ~/.kube/cluster-1 --authentication-kubeconfig ~/.kube/cluster-1 --authorization-kubeconfig ~/.kube/cluster-1 --secure-port 6443 --bind-address 127.0.0.1`
+`./adapter --lister-kubeconfig ~/.kube/cluster-1 --authentication-kubeconfig ~/.kube/cluster-1 --authorization-kubeconfig ~/.kube/cluster-1 --secure-port 6443 --bind-address 127.0.0.1 --signalfx-realm us0`
 
 ### Integration Tests
 The main form of automated testing for this project is integration tests that
