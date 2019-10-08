@@ -24,11 +24,11 @@ func TestHPAMetricPrograms(t *testing.T) {
 				}),
 				PodSelector: forceLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"app": "myapp",
+						"example.com/app": "myapp",
 					},
 				}),
 			},
-			expectedProgram: `data("my_metric", filter=filter("app", "myapp") and filter("verb", "GET") and filter("kubernetes_namespace", "default")).publish()`,
+			expectedProgram: `data("my_metric", filter=filter("example_com_app", "myapp") and filter("verb", "GET") and filter("kubernetes_namespace", "default")).publish()`,
 		},
 		{
 			metric: HPAMetric{

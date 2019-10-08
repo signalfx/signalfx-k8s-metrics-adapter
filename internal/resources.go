@@ -42,6 +42,10 @@ type HPAMetric struct {
 	HPAResource autoscaling.CrossVersionObjectReference
 }
 
+var propNameSanitizer = strings.NewReplacer(
+	".", "_",
+	"/", "_")
+
 // IsExternal returns true if this metric is an external (not custom) metric.
 func (m *HPAMetric) IsExternal() bool {
 	return m.Program != ""
@@ -108,7 +112,7 @@ func filtersFromSelector(selector labels.Selector) ([]string, error) {
 		if req.Operator() != selection.Equals {
 			return nil, fmt.Errorf("unsupported selector operator in selector '%v'", selector)
 		}
-		filters = append(filters, fmt.Sprintf(`filter("%s", "%s")`, req.Key(), req.Values().List()[0]))
+		filters = append(filters, fmt.Sprintf(`filter("%s", "%s")`, propNameSanitizer.Replace(req.Key()), req.Values().List()[0]))
 	}
 	return filters, nil
 }

@@ -238,7 +238,7 @@ func TestPodMetrics(t *testing.T) {
 	var metrics *custom_metrics.MetricValueList
 	waitFor(5*time.Second, func() bool {
 		metrics, err = get("jobs_queued")
-		return err == nil && len(metrics.Items) > 0 && fakeSignalFlow.RunningJobsForProgram(expectedProgram) == 1
+		return err == nil && len(metrics.Items) > 1 && fakeSignalFlow.RunningJobsForProgram(expectedProgram) == 1
 	})
 	require.Nil(t, err)
 
@@ -306,6 +306,10 @@ func TestPodMetrics(t *testing.T) {
 	require.Nil(t, err)
 
 	require.Len(t, metrics.Items, 2)
+	sort.Slice(metrics.Items, func(i, j int) bool {
+		return metrics.Items[i].DescribedObject.Name < metrics.Items[j].DescribedObject.Name
+	})
+
 	require.Equal(t, metrics.Items[0].Metric, custom_metrics.MetricIdentifier{
 		Name: "jobs_processed",
 	})
@@ -765,6 +769,8 @@ func TestRestartJobOnSignalFlowError(t *testing.T) {
 	require.Len(t, metric.Items, 1)
 
 	fakeSignalFlow.KillExistingConnections()
+	// Give it enough time to get the adapter's connection closed.
+	time.Sleep(1 * time.Second)
 
 	// Change the metric values to prove the job runner actually reconnected.
 	fakeSignalFlow.SetTSIDFloatData(tsid, 1000.0)
