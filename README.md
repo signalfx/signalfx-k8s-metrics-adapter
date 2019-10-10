@@ -117,7 +117,7 @@ Metric selectors are converted verbatim to SignalFlow `filter` clauses.
 allow you to define arbitrary SignalFlow programs to get any metrics you want
 from SignalFx.  The SignalFlow programs are defined in special annotations on
 the HPA resource itself.  The annotations are of the form
-`signalfx.com.external.metrics/<metric name>: <signalflow program>`.  For
+`signalfx.com.external.metric/<metric name>: <signalflow program>`.  For
 example, if you have an HPA on a work queue service and wanted to scale based
 on the maximum size of the queue in any single worker pod:
 
