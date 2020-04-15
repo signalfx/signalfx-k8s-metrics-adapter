@@ -20,8 +20,7 @@ namespace** due to how Kubernetes queries the adapter for them.
 ## Example HPA
 
 ```yaml
-
-apiVersion: autoscaling/v2beta1
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata:
   annotations:
@@ -34,17 +33,23 @@ metadata:
 spec:
   maxReplicas: 10
   metrics:
-  - pods:
-      metricName: nginx_requests
-      selector:
-        matchLabels:
-          plugin: nginx
-      targetAverageValue: "100"
-    type: Pods
-  - external:
-      metricName: job_lag_seconds
-      targetAverageValue: "10"
-    type: External
+  - type: Pods
+    pods:
+      metric:
+        name: nginx_requests
+        selector:
+          matchLabels:
+            plugin: nginx
+      target:
+        type: AverageValue
+        averageValue: "100"
+  - type: External
+    external:
+      metric:
+        name: job_lag_seconds
+      target:
+        type: AverageValue
+        averageValue: "10"
   minReplicas: 5
   scaleTargetRef:
     apiVersion: extensions/v1beta1
@@ -122,7 +127,7 @@ example, if you have an HPA on a work queue service and wanted to scale based
 on the maximum size of the queue in any single worker pod:
 
 ```yaml
-apiVersion: autoscaling/v2beta1
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata:
   annotations:
@@ -132,10 +137,13 @@ metadata:
 spec:
   maxReplicas: 10
   metrics:
-  - external:
-      metricName: queue_size
-      targetValue: "500"
-    type: External
+  - type: External
+    external:
+      metric:
+        name: queue_size
+      target:
+        type: AverageValue
+        averageValue: "500"
   minReplicas: 5
   scaleTargetRef:
     apiVersion: extensions/v1beta1

@@ -1,5 +1,5 @@
 ---
-apiVersion: autoscaling/v2beta1
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata:
   annotations:
@@ -12,13 +12,16 @@ spec:
   minReplicas: 1
   maxReplicas: 10
   metrics:
-  - pods:
-      metricName: nginx_requests
-      selector:
-        matchLabels:
-          plugin: nginx
-      targetAverageValue: "100"
-    type: Pods
+  - type: Pods
+    pods:
+      metric:
+        name: nginx_requests
+        selector:
+          matchLabels:
+            plugin: nginx
+      target:
+        type: AverageValue
+        averageValue: "100"
   scaleTargetRef:
     apiVersion: extensions/v1beta1
     kind: Deployment
