@@ -166,7 +166,7 @@ This adapter should be installed within the cluster that you want to use it
 for.  It can go in any namespace, as it serves metrics across the entire
 cluster.
 
-The simplest way to install is via the [Helm Chart](./deployments/helm/signalfx-k8s-metrics-adatper).
+The simplest way to install is via the [Helm Chart](./deployments/helm/signalfx-k8s-metrics-adapter).
 
 #### Configuring the stream endpoint
 
