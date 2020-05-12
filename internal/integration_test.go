@@ -105,7 +105,18 @@ func prepNamespace(t *testing.T, k8sClient kubernetes.Interface) func() {
 	return cleanup
 }
 
-func providerWithBackend(t *testing.T) (*SignalFxProvider, kubernetes.Interface, *signalflow.FakeBackend, context.CancelFunc) {
+type testConfig struct {
+	minTimeseriesExpiry time.Duration
+}
+
+func (tc *testConfig) MinimumTimeseriesExpiry() time.Duration {
+	if tc == nil || tc.minTimeseriesExpiry == 0 {
+		return 3 * time.Second
+	}
+	return tc.minTimeseriesExpiry
+}
+
+func providerWithBackend(t *testing.T, conf *testConfig) (*SignalFxProvider, kubernetes.Interface, *signalflow.FakeBackend, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	backend := signalflow.NewRunningFakeBackend()
@@ -113,6 +124,7 @@ func providerWithBackend(t *testing.T) (*SignalFxProvider, kubernetes.Interface,
 
 	jobRunner := NewSignalFlowJobRunner(client)
 	jobRunner.CleanupOldTSIDsInterval = 2 * time.Second
+	jobRunner.MinimumTimeseriesExpiry = conf.MinimumTimeseriesExpiry()
 	go jobRunner.Run(ctx)
 
 	registry := NewRegistry(jobRunner)
@@ -144,7 +156,7 @@ func providerWithBackend(t *testing.T) (*SignalFxProvider, kubernetes.Interface,
 }
 
 func TestPodMetrics(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t)
+	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	deployment := commonDeployment
@@ -153,7 +165,6 @@ func TestPodMetrics(t *testing.T) {
 			Name: "myapp",
 			Annotations: map[string]string{
 				"signalfx.com.custom.metrics": "",
-				//"signalfx.com.external.metric/cpu": `data("cpu.utilization").publish()`,
 			},
 		},
 		Spec: autoscalingv1.HorizontalPodAutoscalerSpec{
@@ -236,10 +247,10 @@ func TestPodMetrics(t *testing.T) {
 	}
 
 	var metrics *custom_metrics.MetricValueList
-	waitFor(5*time.Second, func() bool {
+	require.True(t, waitFor(timeout, func() bool {
 		metrics, err = get("jobs_queued")
 		return err == nil && len(metrics.Items) > 1 && fakeSignalFlow.RunningJobsForProgram(expectedProgram) == 1
-	})
+	}))
 	require.Nil(t, err)
 
 	require.Len(t, metrics.Items, 2)
@@ -363,7 +374,7 @@ func TestPodMetrics(t *testing.T) {
 }
 
 func TestObjectMetrics(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t)
+	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	deployment := commonDeployment
@@ -457,7 +468,7 @@ func TestObjectMetrics(t *testing.T) {
 }
 
 func TestExternalMetrics(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t)
+	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	targetValue := resource.MustParse("500m")
@@ -542,7 +553,7 @@ func TestExternalMetrics(t *testing.T) {
 }
 
 func TestCustomMetricWhitelist(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t)
+	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	deployment := commonDeployment
@@ -694,7 +705,7 @@ func TestCustomMetricWhitelist(t *testing.T) {
 }
 
 func TestRestartJobOnSignalFlowError(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t)
+	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	targetValue := resource.MustParse("500m")
@@ -791,7 +802,7 @@ func TestRestartJobOnSignalFlowError(t *testing.T) {
 }
 
 func TestMultipleHPAs(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t)
+	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	numHPAs := 10
@@ -863,7 +874,7 @@ func TestMultipleHPAs(t *testing.T) {
 	for i := 0; i < numHPAs; i++ {
 		var metrics *custom_metrics.MetricValueList
 		var err error
-		waitFor(timeout*2, func() bool {
+		require.True(t, waitFor(timeout*3, func() bool {
 			metrics, err = prov.GetMetricBySelector(
 				testNamespace,
 				forceLabelSelector(&metav1.LabelSelector{
@@ -878,7 +889,7 @@ func TestMultipleHPAs(t *testing.T) {
 					}},
 				nil)
 			return err == nil && len(metrics.Items) > 0 && fakeSignalFlow.RunningJobsForProgram(expectedPrograms[i]) == 1
-		})
+		}))
 		require.Nil(t, err)
 
 		require.Len(t, metrics.Items, 2)
@@ -926,6 +937,102 @@ func TestMultipleHPAs(t *testing.T) {
 		},
 	}
 	require.Contains(t, metricList, expectedCustomMetricInfo)
+}
+
+func TestMinimumExpiry(t *testing.T) {
+	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, &testConfig{
+		minTimeseriesExpiry: 15 * time.Second,
+	})
+	defer cancel()
+
+	deployment := commonDeployment
+	hpa := &autoscalingv1.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "myapp",
+			Annotations: map[string]string{
+				"signalfx.com.custom.metrics": "",
+			},
+		},
+		Spec: autoscalingv1.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv1.CrossVersionObjectReference{
+				Kind:       "Deployment",
+				Name:       "demo-deployment",
+				APIVersion: "apps/v1",
+			},
+			MinReplicas: &[]int32{1}[0],
+			MaxReplicas: 1,
+			Metrics: []autoscalingv1.MetricSpec{
+				{
+					Type: autoscalingv1.PodsMetricSourceType,
+					Pods: &autoscalingv1.PodsMetricSource{
+						MetricName:         "jobs_queued",
+						TargetAverageValue: resource.MustParse("1k"),
+					},
+				},
+			},
+		},
+	}
+	var err error
+	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(deployment)
+	require.Nil(t, err)
+
+	hpa, err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Create(hpa)
+	require.Nil(t, err)
+
+	tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
+	for i, podName := range []string{"pod1", "pod2"} {
+		fakeSignalFlow.AddTSIDMetadata(tsids[i], &messages.MetadataProperties{
+			Metric:       "jobs_queued",
+			ResolutionMS: 1000,
+			CustomProperties: map[string]string{
+				"kubernetes_pod_name":  podName,
+				"kubernetes_namespace": "default",
+			},
+		})
+	}
+
+	for i, val := range []float64{5, 10} {
+		fakeSignalFlow.SetTSIDFloatData(tsids[i], val)
+	}
+
+	expectedProgram := fmt.Sprintf(`data("jobs_queued", filter=filter("app", "queue") and filter("kubernetes_namespace", "%s")).publish()`, testNamespace)
+	fakeSignalFlow.AddProgramTSIDs(expectedProgram, tsids)
+
+	var metricList []provider.CustomMetricInfo
+	waitFor(5*time.Second, func() bool {
+		metricList = prov.ListAllMetrics()
+		found := false
+		for i := range metricList {
+			found = found || metricList[i].Metric == "jobs_queued"
+		}
+		return found
+	})
+
+	for _, tsid := range tsids {
+		fakeSignalFlow.RemoveTSIDData(tsid)
+	}
+
+	// The metric should expire 15 seconds after we stop sending data since we
+	// overrode the minimum expiry to 15 seconds instead of the default 3
+	// seconds (3 * 1s max ts resolution).
+
+	waitFor(10*time.Second, func() bool {
+		metricList = prov.ListAllMetrics()
+		found := false
+		for i := range metricList {
+			found = found || metricList[i].Metric == "jobs_queued"
+		}
+		return found
+	})
+
+	waitFor(10*time.Second, func() bool {
+		metricList = prov.ListAllMetrics()
+		found := false
+		for i := range metricList {
+			found = found || metricList[i].Metric == "jobs_queued"
+		}
+		return !found
+	})
 }
 
 func waitFor(timeout time.Duration, f func() bool) bool {
