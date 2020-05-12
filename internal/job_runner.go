@@ -75,6 +75,7 @@ type SignalFlowJobRunner struct {
 	dataRequestCh chan dataRequest
 
 	CleanupOldTSIDsInterval time.Duration
+	MinimumTimeseriesExpiry time.Duration
 
 	TotalJobsStarted int64
 	TotalJobsStopped int64
@@ -224,6 +225,11 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 					if meta.Resolution != 0 {
 						expiry = meta.Resolution * 3
 					}
+
+					if expiry < jr.MinimumTimeseriesExpiry {
+						expiry = jr.MinimumTimeseriesExpiry
+					}
+
 					if now.Sub(meta.Timestamp) > expiry {
 						delete(snapshot, tsid)
 						klog.V(5).Infof("Cleaning up old TSID %s from computation with handle %s", tsid, handle)
