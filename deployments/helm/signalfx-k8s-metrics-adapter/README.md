@@ -10,8 +10,8 @@ Then to ensure the latest state of the repository, run:
 
 `$ helm repo update`
 
-Then you can install the agent using the chart name `signalfx/signalfx-agent`.
-`$ helm install --set imageTag=<ADAPTER_VERSION> --set accessToken=MY_ORG_ACCESS_TOKEN signalfx/k8s-metrics-adapter`
+Then you can install the adapter using the chart name `signalfx/signalfx-k8s-metrics-adapter`.
+`$ helm install --set imageTag=<ADAPTER_VERSION> --set accessToken=MY_ORG_ACCESS_TOKEN signalfx/signalfx-k8s-metrics-adapter`
 
 You can see the adapter versions at
 https://github.com/signalfx/signalfx-k8s-metrics-adapter/releases.
