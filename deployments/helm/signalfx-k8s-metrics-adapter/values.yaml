@@ -9,3 +9,10 @@ imageTag: 0.2.0
 imagePullPolicy: IfNotPresent
 args:
 
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 500m
+    memory: 512Mi

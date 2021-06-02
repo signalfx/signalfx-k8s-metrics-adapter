@@ -30,6 +30,8 @@ spec:
       serviceAccountName: {{ template "signalfx-metrics-adapter.fullname" . }}-apiserver
       containers:
       - name: apiserver
+        resources:
+{{ toYaml .Values.resources | indent 10 }}
         image: {{ .Values.image }}:{{ .Values.imageTag }}
         imagePullPolicy: {{ .Values.imagePullPolicy }}
         {{ with .Values.args }}
