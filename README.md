@@ -1,3 +1,5 @@
+:warning: **This project is deprecated**
+
 # SignalFx Kubernetes Metrics Adapter
 
 This is a custom metrics adapter that allows using SignalFx metrics in a
