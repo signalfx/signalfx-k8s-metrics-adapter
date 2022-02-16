@@ -1,0 +1,78 @@
+name: K8s Test
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+  pull_request:
+
+env:
+  GO_VERSION: "1.12.1"
+  MINIKUBE_VERSION: "v1.3.1"
+
+jobs:
+  k8s-test:
+    name: k8s-test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        K8S_VERSION: [ "v1.12.0", "v1.15.0" ]
+    steps:
+      - name: Check out the codebase.
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache go dependencies
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/go/bin
+          key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
+
+      - name: Cache kubectl
+        uses: actions/cache@v2
+        with:
+          path: /tmp/kubectl
+          key: v1-kubectl-binary-${{ matrix.K8S_VERSION }}
+
+      - name: Download kubectl
+        run: |
+          if [[ ! -e "/tmp/kubectl" ]]; then
+            wget -q -O "/tmp/kubectl" https://storage.googleapis.com/kubernetes-release/release/${{ matrix.K8S_VERSION }}/bin/linux/amd64/kubectl
+          fi
+          sudo install /tmp/kubectl /usr/local/bin/kubectl
+          sudo chmod a+x /usr/local/bin/kubectl
+
+      - name: Cache minikube
+        uses: actions/cache@v2
+        with:
+          path: /tmp/minikube
+          key: v1-minikube-binary-${{ env.MINIKUBE_VERSION }}
+
+      - name: Download minikube
+        run: |
+          if [[ ! -e "/tmp/minikube" ]]; then
+            wget -q -O "/tmp/minikube" https://storage.googleapis.com/minikube/releases/${{ env.MINIKUBE_VERSION }}/minikube-linux-amd64
+          fi
+          sudo install /tmp/minikube /usr/local/bin/minikube
+          sudo chmod a+x /usr/local/bin/minikube
+
+      - name: Start minikube
+        env:
+          MINIKUBE_IN_STYLE: "false"
+          MINIKUBE_WANTUPDATENOTIFICATION: "false"
+          MINIKUBE_WANTREPORTERRORPROMPT: "false"
+          CHANGE_MINIKUBE_NONE_USER: "true"
+        run:
+          sudo "PATH=$PATH" -E /usr/local/bin/minikube start --vm-driver=none --wait=true --extra-config=kubeadm.ignore-preflight-errors=FileExisting-crictl --kubernetes-version=${{ matrix.K8S_VERSION }}
+
+      - name: Run test
+        run: make test
