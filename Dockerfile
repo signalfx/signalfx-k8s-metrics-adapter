@@ -1,5 +1,9 @@
 FROM golang:1.12 as builder
 
+# upgrade to get latest root CA
+RUN apt-get update && \
+    apt upgrade -y
+
 WORKDIR /opt/app
 COPY go.* ./
 RUN go mod download
