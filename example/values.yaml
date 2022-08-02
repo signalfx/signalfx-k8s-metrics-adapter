@@ -1,0 +1,37 @@
+agent:
+  config:
+    processors:
+      # used for Custom Metrics object
+      resource/add_kubernetes_name:
+        attributes:
+        - action: insert
+          key: kubernetes_name
+          value: webservers
+    receivers:
+      receiver_creator:
+        watch_observers: [k8s_observer]
+        receivers:
+          smartagent/nginx:
+            config:
+              type: collectd/nginx
+              host: '`endpoint`'
+              port: 80
+            rule: type == "pod" && name contains "webservers"
+    service:
+      telemetry:
+        logs:
+          level: "debug"
+      pipelines:
+        metrics:
+          processors:
+          - memory_limiter
+          - batch
+          - resourcedetection
+          - resource
+          - resource/add_kubernetes_name
+          receivers:
+          - hostmetrics
+          - kubeletstats
+          - otlp
+          - receiver_creator
+          - signalfx
