@@ -27,7 +27,7 @@ Deploy the test app [webservers](./webservers.yaml) to a supported Kubernetes cl
 kubectl apply -n hpa-example -f ./webservers.yaml
 ```
 
-Deploy Splunk OTEL. This example [values](./values.yaml) configure the OTEL agent to detect and auto create nginx receivers
+Deploy the [Splunk OpenTelemetry Collector for Kubernetes helm chart](https://github.com/signalfx/splunk-otel-collector-chart). This example [values](./values.yaml) configure the OTEL agent to detect and auto create nginx receivers
 
 ```
 helm install --values values.yaml --set splunkObservability.accessToken='<ingest_token>' --set clusterName='<cluster_name>' --set splunkObservability.realm='<org_realm>' --set gateway.enabled='false' --generate-name splunk-otel-collector-chart/splunk-otel-collector
