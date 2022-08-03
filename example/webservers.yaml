@@ -1,34 +1,5 @@
 ---
-apiVersion: autoscaling/v2beta2
-kind: HorizontalPodAutoscaler
-metadata:
-  annotations:
-    signalfx.com.custom.metrics: ""
-    signalfx.com.external.metric/cpu: data("cpu.utilization", filter=filter("kubernetes_cluster",
-      "istio-cluster")).min().below(3, clamp=True).publish()
-  name: webservers
-  namespace: webservers
-spec:
-  minReplicas: 1
-  maxReplicas: 10
-  metrics:
-  - type: Pods
-    pods:
-      metric:
-        name: nginx_requests
-        selector:
-          matchLabels:
-            plugin: nginx
-      target:
-        type: AverageValue
-        averageValue: "100"
-  scaleTargetRef:
-    apiVersion: extensions/v1beta1
-    kind: Deployment
-    name: nginx-deployment
-
----
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   annotations:
@@ -50,7 +21,6 @@ spec:
   template:
     metadata:
       annotations:
-        agent.signalfx.com/config.80.intervalSeconds: "5"
       labels:
         app: webservers
     spec:

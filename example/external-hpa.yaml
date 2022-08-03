@@ -1,0 +1,22 @@
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  annotations:
+    signalfx.com.external.metric/nginx_requests: data('nginx_requests', filter=filter('app', 'webservers') and filter('k8s.cluster.name', '<cluster_name>')).publish()
+  name: webservers
+  namespace: hpa-example
+spec:
+  maxReplicas: 10
+  metrics:
+  - type: External
+    external:
+      metric:
+        name: nginx_requests
+      target:
+        type: AverageValue
+        averageValue: "500"
+  minReplicas: 1
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webservers
