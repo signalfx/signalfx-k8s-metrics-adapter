@@ -35,9 +35,9 @@ import (
 	"k8s.io/component-base/logs"
 	"k8s.io/klog"
 
-	basecmd "github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/cmd"
-	"github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/provider"
 	"github.com/signalfx/signalfx-k8s-metrics-adapter/internal"
+	basecmd "sigs.k8s.io/custom-metrics-apiserver/pkg/cmd"
+	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 
 	// Get extra auth methods for kube client
 	_ "k8s.io/client-go/plugin/pkg/client/auth"

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	autoscaling "k8s.io/api/autoscaling/v2beta1"
+	autoscaling "k8s.io/api/autoscaling/v2beta2"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"

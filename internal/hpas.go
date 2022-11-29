@@ -12,7 +12,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/signalfx/golib/datapoint"
 	"github.com/signalfx/golib/sfxclient"
-	autoscaling "k8s.io/api/autoscaling/v2beta1"
+	autoscaling "k8s.io/api/autoscaling/v2beta2"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -56,7 +56,7 @@ func NewHPADiscoverer(client kubernetes.Interface, updateCallback HPACallback, d
 }
 
 func (d *HPADiscoverer) Discover(ctx context.Context) {
-	watchList := cache.NewListWatchFromClient(d.client.AutoscalingV2beta1().RESTClient(), "horizontalpodautoscalers", "", fields.Everything())
+	watchList := cache.NewListWatchFromClient(d.client.AutoscalingV2beta2().RESTClient(), "horizontalpodautoscalers", "", fields.Everything())
 
 	_, controller := cache.NewInformer(
 		watchList,
@@ -64,7 +64,7 @@ func (d *HPADiscoverer) Discover(ctx context.Context) {
 		0,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				metrics := d.updateHPA(obj.(*autoscaling.HorizontalPodAutoscaler))
+				metrics := d.updateHPA(ctx, obj.(*autoscaling.HorizontalPodAutoscaler))
 				d.updateCallback(metrics)
 
 				if len(metrics) > 0 {
@@ -85,7 +85,7 @@ func (d *HPADiscoverer) Discover(ctx context.Context) {
 				oldMetrics := d.metricConfig[newHPA.UID]
 				d.deleteCallback(oldMetrics)
 
-				newMetrics := d.updateHPA(newHPA)
+				newMetrics := d.updateHPA(ctx, newHPA)
 				d.updateCallback(newMetrics)
 
 				if len(oldMetrics) != len(newMetrics) {
@@ -114,10 +114,10 @@ func (d *HPADiscoverer) Discover(ctx context.Context) {
 	go controller.Run(ctx.Done())
 }
 
-func (d *HPADiscoverer) updateHPA(hpa *autoscaling.HorizontalPodAutoscaler) []HPAMetric {
+func (d *HPADiscoverer) updateHPA(ctx context.Context, hpa *autoscaling.HorizontalPodAutoscaler) []HPAMetric {
 	klog.V(2).Infof("HPA was updated: %v / %v", hpa.Namespace, hpa.Name)
 
-	metrics := d.extractConfig(hpa)
+	metrics := d.extractConfig(ctx, hpa)
 	klog.V(2).Infof("Extracted from %v / %v HPA: %v", hpa.Namespace, hpa.Name, spew.Sdump(metrics))
 	d.metricConfig[hpa.UID] = metrics
 	return metrics
@@ -127,7 +127,7 @@ var externalRE = regexp.MustCompile(`signalfx.com.external.metric/(?P<metric_nam
 
 const customMetricsAnnotation = "signalfx.com.custom.metrics"
 
-func (d *HPADiscoverer) extractConfig(hpa *autoscaling.HorizontalPodAutoscaler) []HPAMetric {
+func (d *HPADiscoverer) extractConfig(ctx context.Context, hpa *autoscaling.HorizontalPodAutoscaler) []HPAMetric {
 	metrics := map[string]HPAMetric{}
 
 	if whitelist, ok := hpa.Annotations[customMetricsAnnotation]; ok {
@@ -137,7 +137,7 @@ func (d *HPADiscoverer) extractConfig(hpa *autoscaling.HorizontalPodAutoscaler) 
 				whitelistSet[name] = true
 			}
 		}
-		d.populateHPACustomMetrics(metrics, hpa, whitelistSet)
+		d.populateHPACustomMetrics(ctx, metrics, hpa, whitelistSet)
 	}
 
 	externals := map[string]bool{}
@@ -171,16 +171,15 @@ func (d *HPADiscoverer) extractConfig(hpa *autoscaling.HorizontalPodAutoscaler) 
 	return metricsSlice
 }
 
-//
-func (d *HPADiscoverer) populateHPACustomMetrics(metrics map[string]HPAMetric, hpa *autoscaling.HorizontalPodAutoscaler, filterSet map[string]bool) {
-	podSelector, err := getPodLabelSelector(d.client, hpa)
+func (d *HPADiscoverer) populateHPACustomMetrics(ctx context.Context, metrics map[string]HPAMetric, hpa *autoscaling.HorizontalPodAutoscaler, filterSet map[string]bool) {
+	podSelector, err := getPodLabelSelector(ctx, d.client, hpa)
 	if err != nil {
 		klog.Errorf("Could not fetch pod selectors from HPA %s/%s target: %v", hpa.Namespace, hpa.Name, err)
 	}
 
 	for _, metric := range hpa.Spec.Metrics {
 		if metric.Object != nil {
-			name := metric.Object.MetricName
+			name := metric.Object.Metric.Name
 			if len(filterSet) > 0 && !filterSet[name] {
 				continue
 			}
@@ -188,26 +187,26 @@ func (d *HPADiscoverer) populateHPACustomMetrics(metrics map[string]HPAMetric, h
 			m.Metric = name
 			m.Namespace = hpa.Namespace
 			groupKind := schema.GroupKind{
-				Kind: metric.Object.Target.Kind,
+				Kind: metric.Object.DescribedObject.Kind,
 			}
-			mapping, err := d.mapper.RESTMapping(groupKind, metric.Object.Target.APIVersion)
+			mapping, err := d.mapper.RESTMapping(groupKind, metric.Object.DescribedObject.APIVersion)
 			if err != nil {
 				klog.Errorf("Could not get mapping from %v to resource: %v", groupKind, err)
 			}
 			m.GroupResource.Group = mapping.Resource.Group
 			m.GroupResource.Resource = mapping.Resource.Resource
 			m.HPAResource = hpa.Spec.ScaleTargetRef
-			m.TargetName = metric.Object.Target.Name
-			if metric.Object.Selector != nil {
+			m.TargetName = metric.Object.DescribedObject.Name
+			if metric.Object.Metric.Selector != nil {
 				// The requirements come from K8s so they should be pre-validated
-				m.MetricSelector, _ = metav1.LabelSelectorAsSelector(metric.Object.Selector)
+				m.MetricSelector, _ = metav1.LabelSelectorAsSelector(metric.Object.Metric.Selector)
 			}
 			metrics[name] = m
 			continue
 		}
 
 		if metric.Pods != nil {
-			name := metric.Pods.MetricName
+			name := metric.Pods.Metric.Name
 			if len(filterSet) > 0 && !filterSet[name] {
 				continue
 			}
@@ -215,9 +214,9 @@ func (d *HPADiscoverer) populateHPACustomMetrics(metrics map[string]HPAMetric, h
 			m.Metric = name
 			m.Namespace = hpa.Namespace
 			m.GroupResource.Resource = "pods"
-			if metric.Pods.Selector != nil {
+			if metric.Pods.Metric.Selector != nil {
 				// The selector comes from K8s so they should be pre-validated
-				m.MetricSelector, _ = metav1.LabelSelectorAsSelector(metric.Pods.Selector)
+				m.MetricSelector, _ = metav1.LabelSelectorAsSelector(metric.Pods.Metric.Selector)
 			}
 			m.HPAResource = hpa.Spec.ScaleTargetRef
 			m.PodSelector = podSelector
@@ -230,7 +229,7 @@ func (d *HPADiscoverer) populateHPACustomMetrics(metrics map[string]HPAMetric, h
 func (d *HPADiscoverer) populateHPAExternalMetrics(metrics map[string]HPAMetric, hpa *autoscaling.HorizontalPodAutoscaler, filterSet map[string]bool) {
 	for _, metric := range hpa.Spec.Metrics {
 		if metric.External != nil {
-			name := metric.External.MetricName
+			name := metric.External.Metric.Name
 			if !filterSet[name] {
 				continue
 			}
@@ -238,10 +237,10 @@ func (d *HPADiscoverer) populateHPAExternalMetrics(metrics map[string]HPAMetric,
 			m.Metric = name
 			m.Namespace = hpa.Namespace
 			m.HPAResource = hpa.Spec.ScaleTargetRef
-			if metric.External.MetricSelector != nil {
-				klog.Errorf("External metric selector (%v) is used only for identifying the metric, will be ignored in SignalFlow", metric.External.MetricSelector)
+			if metric.External.Metric.Selector != nil {
+				klog.Errorf("External metric selector (%v) is used only for identifying the metric, will be ignored in SignalFlow", metric.External.Metric.Selector)
 				// The requirements come from K8s so they should be pre-validated
-				m.MetricSelector, _ = metav1.LabelSelectorAsSelector(metric.External.MetricSelector)
+				m.MetricSelector, _ = metav1.LabelSelectorAsSelector(metric.External.Metric.Selector)
 			}
 			metrics[name] = m
 			continue
@@ -250,17 +249,17 @@ func (d *HPADiscoverer) populateHPAExternalMetrics(metrics map[string]HPAMetric,
 }
 
 // Copied and modified from https://github.com/zalando-incubator/kube-metrics-adapter/blob/9950851cad3a77ab575c78f88ddabf3df5e35039/pkg/collector/pod_collector.go
-func getPodLabelSelector(client kubernetes.Interface, hpa *autoscaling.HorizontalPodAutoscaler) (labels.Selector, error) {
+func getPodLabelSelector(ctx context.Context, client kubernetes.Interface, hpa *autoscaling.HorizontalPodAutoscaler) (labels.Selector, error) {
 	var selector *metav1.LabelSelector
 	switch hpa.Spec.ScaleTargetRef.Kind {
 	case "Deployment":
-		deployment, err := client.AppsV1().Deployments(hpa.Namespace).Get(hpa.Spec.ScaleTargetRef.Name, metav1.GetOptions{})
+		deployment, err := client.AppsV1().Deployments(hpa.Namespace).Get(ctx, hpa.Spec.ScaleTargetRef.Name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 		selector = deployment.Spec.Selector
 	case "StatefulSet":
-		sts, err := client.AppsV1().StatefulSets(hpa.Namespace).Get(hpa.Spec.ScaleTargetRef.Name, metav1.GetOptions{})
+		sts, err := client.AppsV1().StatefulSets(hpa.Namespace).Get(ctx, hpa.Spec.ScaleTargetRef.Name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}

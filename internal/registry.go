@@ -3,10 +3,10 @@ package internal
 import (
 	"sync"
 
-	"github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/provider"
 	"github.com/signalfx/golib/datapoint"
 	"github.com/signalfx/golib/sfxclient"
 	"k8s.io/klog"
+	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 )
 
 type Registry struct {
