@@ -7,29 +7,31 @@ on:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+
   pull_request:
-
-env:
-  GO_VERSION: "1.12.1"
-  MINIKUBE_VERSION: "v1.3.1"
+  workflow_dispatch:
 
 jobs:
   k8s-test:
     name: k8s-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
-        K8S_VERSION: [ "v1.12.0", "v1.15.0" ]
+        # add "v1.25.0" after integration is fixed
+        K8S_VERSION: [ "v1.22.0", "v1.23.0",  "v1.24.0" ]
+    env:
+      GO_VERSION: "1.19.0"
+      MINIKUBE_VERSION: v1.28.0
+
     steps:
       - name: Check out the codebase.
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Cache go dependencies
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: |
             ~/.cache/go-build
@@ -38,7 +40,7 @@ jobs:
           key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
 
       - name: Cache kubectl
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /tmp/kubectl
           key: v1-kubectl-binary-${{ matrix.K8S_VERSION }}
@@ -52,7 +54,7 @@ jobs:
           sudo chmod a+x /usr/local/bin/kubectl
 
       - name: Cache minikube
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /tmp/minikube
           key: v1-minikube-binary-${{ env.MINIKUBE_VERSION }}
@@ -64,15 +66,15 @@ jobs:
           fi
           sudo install /tmp/minikube /usr/local/bin/minikube
           sudo chmod a+x /usr/local/bin/minikube
+          sudo sysctl fs.protected_regular=0
 
-      - name: Start minikube
-        env:
-          MINIKUBE_IN_STYLE: "false"
-          MINIKUBE_WANTUPDATENOTIFICATION: "false"
-          MINIKUBE_WANTREPORTERRORPROMPT: "false"
-          CHANGE_MINIKUBE_NONE_USER: "true"
-        run:
-          sudo "PATH=$PATH" -E /usr/local/bin/minikube start --vm-driver=none --wait=true --extra-config=kubeadm.ignore-preflight-errors=FileExisting-crictl --kubernetes-version=${{ matrix.K8S_VERSION }}
+      - name: Start Minikube
+        run: |
+          minikube start --container-runtime=docker --cpus 2 --memory 4096 --kubernetes-version=${{ matrix.K8S_VERSION }} --no-vtx-check
+          export JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'
+          until kubectl get nodes -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do
+            sleep 1;
+          done
 
       - name: Run test
         run: make test
