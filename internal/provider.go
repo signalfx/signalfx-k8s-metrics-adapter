@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
@@ -15,9 +16,9 @@ import (
 	"k8s.io/metrics/pkg/apis/external_metrics"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/provider"
 	"github.com/signalfx/golib/datapoint"
 	"github.com/signalfx/golib/sfxclient"
+	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 )
 
 // SignalFxProvider maps K8s metrics to SignalFlow job output
@@ -45,7 +46,7 @@ func NewSignalFxProvider(registry *Registry, mapper apimeta.RESTMapper) *SignalF
 
 var _ provider.MetricsProvider = &SignalFxProvider{}
 
-func (p *SignalFxProvider) GetMetricByName(name types.NamespacedName, info provider.CustomMetricInfo, metricSelector labels.Selector) (*custom_metrics.MetricValue, error) {
+func (p *SignalFxProvider) GetMetricByName(ctx context.Context, name types.NamespacedName, info provider.CustomMetricInfo, metricSelector labels.Selector) (*custom_metrics.MetricValue, error) {
 	atomic.AddInt64(&p.totalGetMetricByNameCalls, 1)
 
 	keyMetric := &HPAMetric{
@@ -108,7 +109,7 @@ func (p *SignalFxProvider) GetMetricByName(name types.NamespacedName, info provi
 	return &out, nil
 }
 
-func (p *SignalFxProvider) GetMetricBySelector(namespace string, selector labels.Selector, info provider.CustomMetricInfo, metricSelector labels.Selector) (*custom_metrics.MetricValueList, error) {
+func (p *SignalFxProvider) GetMetricBySelector(ctx context.Context, namespace string, selector labels.Selector, info provider.CustomMetricInfo, metricSelector labels.Selector) (*custom_metrics.MetricValueList, error) {
 	atomic.AddInt64(&p.totalGetMetricBySelectorCalls, 1)
 
 	keyMetric := &HPAMetric{
@@ -171,7 +172,7 @@ func (p *SignalFxProvider) ListAllMetrics() []provider.CustomMetricInfo {
 	return out
 }
 
-func (p *SignalFxProvider) GetExternalMetric(namespace string, metricSelector labels.Selector, info provider.ExternalMetricInfo) (*external_metrics.ExternalMetricValueList, error) {
+func (p *SignalFxProvider) GetExternalMetric(ctx context.Context, namespace string, metricSelector labels.Selector, info provider.ExternalMetricInfo) (*external_metrics.ExternalMetricValueList, error) {
 	atomic.AddInt64(&p.totalGetExternalMetricCalls, 1)
 
 	keyMetric := &HPAMetric{

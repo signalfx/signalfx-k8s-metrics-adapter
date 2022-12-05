@@ -35,9 +35,9 @@ import (
 	"k8s.io/component-base/logs"
 	"k8s.io/klog"
 
-	basecmd "github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/cmd"
-	"github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/provider"
 	"github.com/signalfx/signalfx-k8s-metrics-adapter/internal"
+	basecmd "sigs.k8s.io/custom-metrics-apiserver/pkg/cmd"
+	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 
 	// Get extra auth methods for kube client
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -112,6 +112,8 @@ func main() {
 
 	var minimumTimeseriesExpiry time.Duration
 	cmd.Flags().DurationVar(&minimumTimeseriesExpiry, "minimum-ts-expiry", 30*time.Second, "The minimum duration in which no data is received for a timeseries before that timeseries is expired and no longer reports data to K8s.  The default is 3 times the reported data resolution in the SignalFlow job.")
+
+	klog.InitFlags(nil) // initalize klog flags
 
 	cmd.Flags().AddGoFlagSet(flag.CommandLine) // make sure we get the klog flags
 	err := cmd.Flags().Parse(os.Args)

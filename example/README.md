@@ -1,8 +1,8 @@
 # HPA Example
 
 ## Disclaimer
-This example is validated using the latest SignalFX HPA Adapter on kubernetes v1.20. <br/>
-The adapter implements the autoscaling api `v2beta1`, this version is not supported in kubernetes v1.22 and above. <br/>
+This example is validated using the latest SignalFX HPA Adapter on kubernetes v1.22. <br/>
+The adapter implements the autoscaling api `v2beta2`, this version is supported in kubernetes v1.12+, unavailable in v1.26+<br/>
 We'll also be using Splunk OpenTelemetry distribution to emit app metrics to our backend
 
 ## Summary

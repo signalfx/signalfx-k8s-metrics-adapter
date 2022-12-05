@@ -8,15 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/dynamicmapper"
-	"github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/provider"
 	"github.com/signalfx/golib/pointer"
 	"github.com/signalfx/signalfx-go/idtool"
 	"github.com/signalfx/signalfx-go/signalflow"
 	"github.com/signalfx/signalfx-go/signalflow/messages"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv1 "k8s.io/api/autoscaling/v2beta1"
+	autoscalingv1 "k8s.io/api/autoscaling/v2beta2"
 	apiv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -28,6 +26,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/metrics/pkg/apis/custom_metrics"
 	"k8s.io/metrics/pkg/apis/external_metrics"
+	"sigs.k8s.io/custom-metrics-apiserver/pkg/dynamicmapper"
+	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
@@ -82,9 +82,9 @@ func forceLabelSelector(selector *metav1.LabelSelector) labels.Selector {
 	return sel
 }
 
-func prepNamespace(t *testing.T, k8sClient kubernetes.Interface) func() {
+func prepNamespace(t *testing.T, ctx context.Context, k8sClient kubernetes.Interface) func() {
 	cleanup := func() {
-		_ = k8sClient.CoreV1().Namespaces().Delete(testNamespace, &metav1.DeleteOptions{
+		_ = k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{
 			GracePeriodSeconds: pointer.Int64(0),
 			PropagationPolicy:  (*metav1.DeletionPropagation)(pointer.String("Foreground")),
 		})
@@ -93,11 +93,11 @@ func prepNamespace(t *testing.T, k8sClient kubernetes.Interface) func() {
 	cleanup()
 	var err error
 	waitFor(30*time.Second, func() bool {
-		_, err = k8sClient.CoreV1().Namespaces().Create(&apiv1.Namespace{
+		_, err = k8sClient.CoreV1().Namespaces().Create(ctx, &apiv1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testNamespace,
 			},
-		})
+		}, metav1.CreateOptions{})
 		return err == nil
 	})
 	require.Nil(t, err)
@@ -116,7 +116,7 @@ func (tc *testConfig) MinimumTimeseriesExpiry() time.Duration {
 	return tc.minTimeseriesExpiry
 }
 
-func providerWithBackend(t *testing.T, conf *testConfig) (*SignalFxProvider, kubernetes.Interface, *signalflow.FakeBackend, context.CancelFunc) {
+func providerWithBackend(t *testing.T, conf *testConfig) (*SignalFxProvider, kubernetes.Interface, *signalflow.FakeBackend, context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	backend := signalflow.NewRunningFakeBackend()
@@ -142,22 +142,24 @@ func providerWithBackend(t *testing.T, conf *testConfig) (*SignalFxProvider, kub
 	k8sClient, err := kubernetes.NewForConfig(config)
 	require.Nil(t, err)
 
-	cleanup := prepNamespace(t, k8sClient)
+	cleanup := prepNamespace(t, ctx, k8sClient)
 
 	mapper, err := dynamicmapper.NewRESTMapper(k8sClient.Discovery(), 120*time.Second)
 	require.Nil(t, err)
 	discoverer := NewHPADiscoverer(k8sClient, registry.HandleHPAUpdated, registry.HandleHPADeleted, mapper)
 	go discoverer.Discover(ctx)
 
-	return NewSignalFxProvider(registry, mapper), k8sClient, backend, func() {
+	return NewSignalFxProvider(registry, mapper), k8sClient, backend, ctx, func() {
 		cleanup()
 		cancel()
 	}
 }
 
 func TestPodMetrics(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
+	prov, k8sClient, fakeSignalFlow, ctx, cancel := providerWithBackend(t, nil)
 	defer cancel()
+
+	targetAverageValue := resource.MustParse("1k")
 
 	deployment := commonDeployment
 	hpa := &autoscalingv1.HorizontalPodAutoscaler{
@@ -179,18 +181,23 @@ func TestPodMetrics(t *testing.T) {
 				{
 					Type: autoscalingv1.PodsMetricSourceType,
 					Pods: &autoscalingv1.PodsMetricSource{
-						MetricName:         "jobs_queued",
-						TargetAverageValue: resource.MustParse("1k"),
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "jobs_queued",
+						},
+						Target: autoscalingv1.MetricTarget{
+							Type:         autoscalingv1.AverageValueMetricType,
+							AverageValue: &targetAverageValue,
+						},
 					},
 				},
 			},
 		},
 	}
 	var err error
-	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(deployment)
+	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	hpa, err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Create(hpa)
+	hpa, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
@@ -232,6 +239,7 @@ func TestPodMetrics(t *testing.T) {
 
 	get := func(metric string) (*custom_metrics.MetricValueList, error) {
 		return prov.GetMetricBySelector(
+			ctx,
 			testNamespace,
 			forceLabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -299,8 +307,8 @@ func TestPodMetrics(t *testing.T) {
 
 	// Change the HPA metric and make sure it stops the old job and starts the
 	// new one.
-	hpa, err = updateHPA(k8sClient, hpa.Name, func(hpa *autoscalingv1.HorizontalPodAutoscaler) {
-		hpa.Spec.Metrics[0].Pods.MetricName = "jobs_processed"
+	hpa, err = updateHPA(ctx, k8sClient, hpa.Name, func(hpa *autoscalingv1.HorizontalPodAutoscaler) {
+		hpa.Spec.Metrics[0].Pods.Metric.Name = "jobs_processed"
 	})
 	require.Nil(t, err)
 
@@ -361,7 +369,7 @@ func TestPodMetrics(t *testing.T) {
 
 	// DELETE THE HPA
 
-	err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Delete(hpa.Name, &metav1.DeleteOptions{})
+	err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Delete(ctx, hpa.Name, metav1.DeleteOptions{})
 	require.Nil(t, err)
 
 	require.True(t, waitFor(5*time.Second, func() bool {
@@ -374,8 +382,10 @@ func TestPodMetrics(t *testing.T) {
 }
 
 func TestObjectMetrics(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
+	prov, k8sClient, fakeSignalFlow, ctx, cancel := providerWithBackend(t, nil)
 	defer cancel()
+
+	targetValue := resource.MustParse("1k")
 
 	deployment := commonDeployment
 	hpa := &autoscalingv1.HorizontalPodAutoscaler{
@@ -398,27 +408,32 @@ func TestObjectMetrics(t *testing.T) {
 				{
 					Type: autoscalingv1.ObjectMetricSourceType,
 					Object: &autoscalingv1.ObjectMetricSource{
-						Target: autoscalingv1.CrossVersionObjectReference{
+						DescribedObject: autoscalingv1.CrossVersionObjectReference{
 							Kind:       "Service",
 							Name:       "queue_service",
 							APIVersion: "v1",
 						},
-						Selector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"verb": "POST",
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "requests_queued",
+							Selector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"verb": "POST",
+								},
 							},
 						},
-						MetricName:  "requests_queued",
-						TargetValue: resource.MustParse("1k"),
+						Target: autoscalingv1.MetricTarget{
+							Type:  autoscalingv1.ValueMetricType,
+							Value: &targetValue,
+						},
 					},
 				},
 			},
 		},
 	}
-	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(deployment)
+	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	_, err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Create(hpa)
+	_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	tsid := idtool.ID(rand.Int63())
@@ -437,6 +452,7 @@ func TestObjectMetrics(t *testing.T) {
 	var metric *custom_metrics.MetricValue
 	waitFor(5*time.Second, func() bool {
 		metric, err = prov.GetMetricByName(
+			ctx,
 			types.NamespacedName{
 				Namespace: testNamespace,
 				Name:      "queue_service",
@@ -468,7 +484,7 @@ func TestObjectMetrics(t *testing.T) {
 }
 
 func TestExternalMetrics(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
+	prov, k8sClient, fakeSignalFlow, ctx, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	targetValue := resource.MustParse("500m")
@@ -493,13 +509,18 @@ func TestExternalMetrics(t *testing.T) {
 				{
 					Type: autoscalingv1.ExternalMetricSourceType,
 					External: &autoscalingv1.ExternalMetricSource{
-						MetricName: "cputest",
-						MetricSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"app": "myapp",
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "cputest",
+							Selector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app": "myapp",
+								},
 							},
 						},
-						TargetValue: &targetValue,
+						Target: autoscalingv1.MetricTarget{
+							Type:  autoscalingv1.ValueMetricType,
+							Value: &targetValue,
+						},
 					},
 				},
 			},
@@ -519,15 +540,16 @@ func TestExternalMetrics(t *testing.T) {
 	expectedProgram := `data("cpu.utilization").publish()`
 	fakeSignalFlow.AddProgramTSIDs(expectedProgram, []idtool.ID{tsid})
 
-	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(deployment)
+	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	_, err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Create(hpa)
+	_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	var metric *external_metrics.ExternalMetricValueList
 	waitFor(5*time.Second, func() bool {
 		metric, err = prov.GetExternalMetric(
+			ctx,
 			testNamespace,
 			forceLabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -553,8 +575,10 @@ func TestExternalMetrics(t *testing.T) {
 }
 
 func TestCustomMetricWhitelist(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
+	prov, k8sClient, fakeSignalFlow, ctx, cancel := providerWithBackend(t, nil)
 	defer cancel()
+
+	targetAverageValue := resource.MustParse("1k")
 
 	deployment := commonDeployment
 	hpa := &autoscalingv1.HorizontalPodAutoscaler{
@@ -576,29 +600,49 @@ func TestCustomMetricWhitelist(t *testing.T) {
 				{
 					Type: autoscalingv1.PodsMetricSourceType,
 					Pods: &autoscalingv1.PodsMetricSource{
-						MetricName:         "metricA",
-						TargetAverageValue: resource.MustParse("1k"),
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "metricA",
+						},
+						Target: autoscalingv1.MetricTarget{
+							Type:         autoscalingv1.AverageValueMetricType,
+							AverageValue: &targetAverageValue,
+						},
 					},
 				},
 				{
 					Type: autoscalingv1.PodsMetricSourceType,
 					Pods: &autoscalingv1.PodsMetricSource{
-						MetricName:         "metricB",
-						TargetAverageValue: resource.MustParse("1k"),
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "metricB",
+						},
+						Target: autoscalingv1.MetricTarget{
+							Type:         autoscalingv1.AverageValueMetricType,
+							AverageValue: &targetAverageValue,
+						},
 					},
 				},
 				{
 					Type: autoscalingv1.PodsMetricSourceType,
 					Pods: &autoscalingv1.PodsMetricSource{
-						MetricName:         "metricC",
-						TargetAverageValue: resource.MustParse("1k"),
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "metricC",
+						},
+						Target: autoscalingv1.MetricTarget{
+							Type:         autoscalingv1.AverageValueMetricType,
+							AverageValue: &targetAverageValue,
+						},
 					},
 				},
 				{
 					Type: autoscalingv1.PodsMetricSourceType,
 					Pods: &autoscalingv1.PodsMetricSource{
-						MetricName:         "metricD",
-						TargetAverageValue: resource.MustParse("1k"),
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "metricD",
+						},
+						Target: autoscalingv1.MetricTarget{
+							Type:         autoscalingv1.AverageValueMetricType,
+							AverageValue: &targetAverageValue,
+						},
 					},
 				},
 			},
@@ -606,10 +650,10 @@ func TestCustomMetricWhitelist(t *testing.T) {
 	}
 
 	var err error
-	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(deployment)
+	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	_, err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Create(hpa)
+	_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
@@ -635,6 +679,7 @@ func TestCustomMetricWhitelist(t *testing.T) {
 	var metrics *custom_metrics.MetricValueList
 	waitFor(5*time.Second, func() bool {
 		metrics, err = prov.GetMetricBySelector(
+			ctx,
 			testNamespace,
 			forceLabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -705,7 +750,7 @@ func TestCustomMetricWhitelist(t *testing.T) {
 }
 
 func TestRestartJobOnSignalFlowError(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
+	prov, k8sClient, fakeSignalFlow, ctx, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	targetValue := resource.MustParse("500m")
@@ -730,13 +775,18 @@ func TestRestartJobOnSignalFlowError(t *testing.T) {
 				{
 					Type: autoscalingv1.ExternalMetricSourceType,
 					External: &autoscalingv1.ExternalMetricSource{
-						MetricName: "cputest",
-						MetricSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"app": "myapp",
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "cputest",
+							Selector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app": "myapp",
+								},
 							},
 						},
-						TargetValue: &targetValue,
+						Target: autoscalingv1.MetricTarget{
+							Type:  autoscalingv1.ValueMetricType,
+							Value: &targetValue,
+						},
 					},
 				},
 			},
@@ -756,15 +806,16 @@ func TestRestartJobOnSignalFlowError(t *testing.T) {
 	expectedProgram := `data("cpu.utilization").publish()`
 	fakeSignalFlow.AddProgramTSIDs(expectedProgram, []idtool.ID{tsid})
 
-	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(deployment)
+	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	_, err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Create(hpa)
+	_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	var metric *external_metrics.ExternalMetricValueList
 	waitFor(5*time.Second, func() bool {
 		metric, err = prov.GetExternalMetric(
+			ctx,
 			testNamespace,
 			forceLabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -788,6 +839,7 @@ func TestRestartJobOnSignalFlowError(t *testing.T) {
 
 	require.True(t, waitFor(timeout*2, func() bool {
 		metric, err = prov.GetExternalMetric(
+			ctx,
 			testNamespace,
 			forceLabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -802,10 +854,11 @@ func TestRestartJobOnSignalFlowError(t *testing.T) {
 }
 
 func TestMultipleHPAs(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, nil)
+	prov, k8sClient, fakeSignalFlow, ctx, cancel := providerWithBackend(t, nil)
 	defer cancel()
 
 	numHPAs := 10
+	targetAverageValue := resource.MustParse("1k")
 
 	var expectedPrograms []string
 	//var hpas []*autoscalingv1.HorizontalPodAutoscaler
@@ -837,17 +890,22 @@ func TestMultipleHPAs(t *testing.T) {
 					{
 						Type: autoscalingv1.PodsMetricSourceType,
 						Pods: &autoscalingv1.PodsMetricSource{
-							MetricName:         "jobs_queued",
-							TargetAverageValue: resource.MustParse("1k"),
+							Metric: autoscalingv1.MetricIdentifier{
+								Name: "jobs_queued",
+							},
+							Target: autoscalingv1.MetricTarget{
+								Type:         autoscalingv1.AverageValueMetricType,
+								AverageValue: &targetAverageValue,
+							},
 						},
 					},
 				},
 			},
 		}
-		_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(deployment)
+		_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 		require.Nil(t, err)
 
-		_, err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Create(hpa)
+		_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 		require.Nil(t, err)
 
 		tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
@@ -876,6 +934,7 @@ func TestMultipleHPAs(t *testing.T) {
 		var err error
 		require.True(t, waitFor(timeout*3, func() bool {
 			metrics, err = prov.GetMetricBySelector(
+				ctx,
 				testNamespace,
 				forceLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -940,10 +999,12 @@ func TestMultipleHPAs(t *testing.T) {
 }
 
 func TestMinimumExpiry(t *testing.T) {
-	prov, k8sClient, fakeSignalFlow, cancel := providerWithBackend(t, &testConfig{
+	prov, k8sClient, fakeSignalFlow, ctx, cancel := providerWithBackend(t, &testConfig{
 		minTimeseriesExpiry: 15 * time.Second,
 	})
 	defer cancel()
+
+	targetAverageValue := resource.MustParse("1k")
 
 	deployment := commonDeployment
 	hpa := &autoscalingv1.HorizontalPodAutoscaler{
@@ -965,18 +1026,23 @@ func TestMinimumExpiry(t *testing.T) {
 				{
 					Type: autoscalingv1.PodsMetricSourceType,
 					Pods: &autoscalingv1.PodsMetricSource{
-						MetricName:         "jobs_queued",
-						TargetAverageValue: resource.MustParse("1k"),
+						Metric: autoscalingv1.MetricIdentifier{
+							Name: "jobs_queued",
+						},
+						Target: autoscalingv1.MetricTarget{
+							Type:         autoscalingv1.AverageValueMetricType,
+							AverageValue: &targetAverageValue,
+						},
 					},
 				},
 			},
 		},
 	}
 	var err error
-	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(deployment)
+	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	hpa, err = k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Create(hpa)
+	hpa, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
@@ -1052,16 +1118,16 @@ func waitFor(timeout time.Duration, f func() bool) bool {
 }
 
 // Retries on 409 errors
-func updateHPA(k8sClient kubernetes.Interface, name string, updater func(hpa *autoscalingv1.HorizontalPodAutoscaler)) (*autoscalingv1.HorizontalPodAutoscaler, error) {
+func updateHPA(ctx context.Context, k8sClient kubernetes.Interface, name string, updater func(hpa *autoscalingv1.HorizontalPodAutoscaler)) (*autoscalingv1.HorizontalPodAutoscaler, error) {
 	for {
-		hpa, err := k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Get(name, metav1.GetOptions{})
+		hpa, err := k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 
 		updater(hpa)
 
-		newHPA, err := k8sClient.AutoscalingV2beta1().HorizontalPodAutoscalers(testNamespace).Update(hpa)
+		newHPA, err := k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Update(ctx, hpa, metav1.UpdateOptions{})
 		if err != nil {
 			if se, ok := err.(*apierrors.StatusError); ok {
 				if se.Status().Code == 409 {
