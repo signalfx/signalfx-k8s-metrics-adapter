@@ -7,14 +7,15 @@ on:
     tags:
       - v[0-9]+.[0-9]+.[0-9]+
   pull_request:
+  workflow_dispatch:
 
 env:
   REGISTRY: "quay.io/signalfx"
   IMAGE_NAME: "k8s-metrics-adapter"
   IMAGE_VERSION: "latest"
-  GO_VERSION: "1.12.1"
-  MINIKUBE_VERSION: "v1.3.1"
-  HELM_VERSION: "v3.8.0"
+  GO_VERSION: "1.19.0"
+  MINIKUBE_VERSION: "v1.28.0"
+  HELM_VERSION: "v3.9.0"
 
 jobs:
   build-image:
@@ -22,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the codebase.
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Build image
         run: |
@@ -31,7 +32,7 @@ jobs:
           docker save -o dist/image.tar ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_VERSION }}
 
       - name: Save image
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: image
           path: ./dist/image.tar
@@ -41,10 +42,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the codebase.
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Cache helm
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /tmp/helm.tar.gz
           key: v1-helm-binary-${{ env.HELM_VERSION }}
@@ -71,13 +72,13 @@ jobs:
       - build-image
     strategy:
       matrix:
-        K8S_VERSION: [ "v1.12.0", "v1.15.0" ]
+        K8S_VERSION: [ "v1.24.0", "v1.25.0" ]
     steps:
       - name: Check out the codebase.
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Download image
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: image
           path: ./dist
@@ -86,7 +87,7 @@ jobs:
         run: docker load -i ./dist/image.tar
 
       - name: Cache kubectl
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /tmp/kubectl
           key: v1-kubectl-binary-${{ matrix.K8S_VERSION }}
@@ -100,7 +101,7 @@ jobs:
           sudo chmod a+x /usr/local/bin/kubectl
 
       - name: Cache helm
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /tmp/helm.tar.gz
           key: v1-helm-binary-${{ env.HELM_VERSION }}
@@ -115,7 +116,7 @@ jobs:
           sudo chmod a+x /usr/local/bin/helm
 
       - name: Cache minikube
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /tmp/minikube
           key: v1-minikube-binary-${{ env.MINIKUBE_VERSION }}
@@ -127,15 +128,15 @@ jobs:
           fi
           sudo install /tmp/minikube /usr/local/bin/minikube
           sudo chmod a+x /usr/local/bin/minikube
+          sudo sysctl fs.protected_regular=0
 
       - name: Start minikube
-        env:
-          MINIKUBE_IN_STYLE: "false"
-          MINIKUBE_WANTUPDATENOTIFICATION: "false"
-          MINIKUBE_WANTREPORTERRORPROMPT: "false"
-          CHANGE_MINIKUBE_NONE_USER: "true"
-        run:
-          sudo "PATH=$PATH" -E /usr/local/bin/minikube start --vm-driver=none --wait=true --extra-config=kubeadm.ignore-preflight-errors=FileExisting-crictl --kubernetes-version=${{ matrix.K8S_VERSION }}
+        run: |
+          minikube start --container-runtime=docker --cpus 2 --memory 4096 --kubernetes-version=${{ matrix.K8S_VERSION }} --no-vtx-check
+          export JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'
+          until kubectl get nodes -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do
+            sleep 1;
+          done
 
       - name: Run test
         run: |
