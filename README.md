@@ -220,4 +220,3 @@ SignalFx adapter was inspired from that project.
 ## TODO
 
  - Support non-standard dimensions/properties for pod/object metrics
- - Get CircleCI setup
