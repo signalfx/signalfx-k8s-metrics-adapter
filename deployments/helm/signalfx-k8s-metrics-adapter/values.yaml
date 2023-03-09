@@ -4,8 +4,11 @@ streamURL: wss://stream.signalfx.com/v2/signalflow
 # (REQUIRED) The SignalFx org access token
 accessToken:
 
+# The amount of time to wait for a submitted job to receive its metadata from the server.
+metadataTimeout: 10s
+
 image: quay.io/signalfx/k8s-metrics-adapter
-imageTag: 0.6.0
+imageTag: 0.7.0
 imagePullPolicy: IfNotPresent
 args:
 

@@ -75,6 +75,7 @@ type SignalFlowJobRunner struct {
 	dataRequestCh chan dataRequest
 
 	CleanupOldTSIDsInterval time.Duration
+	MetadataTimeout         time.Duration
 	MinimumTimeseriesExpiry time.Duration
 
 	TotalJobsStarted int64
@@ -105,11 +106,17 @@ func (jr *SignalFlowJobRunner) ReplaceOrStartJob(program string) error {
 		return err
 	}
 
-	comp.MetadataTimeout = 10 * time.Second
+	comp.MetadataTimeout = jr.MetadataTimeout
 	// Wait for the handle to come through before sending the message to block
 	// the loop less.
 	handle := comp.Handle()
 	if handle == "" {
+		// It's possible that the job has already started but the server was delayed sending the handle
+		// to avoid leaking jobs, issue delete using the channel name, ie: detach.
+		err = comp.Detach()
+		if err != nil {
+			klog.Errorf("Failed to clean up job that is missing its handle: %v", err)
+		}
 		return fmt.Errorf("Could not get job handle within timeout: %v", comp.Err())
 	}
 
@@ -160,9 +167,10 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 
 			klog.Infof("Stopping SignalFlow compuation: %s", stoppedProgram)
 
-			err := comp.Stop()
+			// detach and stop are equivalent and the recommended method from backend team is to use detach
+			err := comp.Detach()
 			if err != nil {
-				klog.Errorf("Failed to stop SignalFlow job %s: %v", stoppedProgram, err)
+				klog.Errorf("Failed to detach SignalFlow job %s: %v", stoppedProgram, err)
 			}
 			atomic.AddInt64(&jr.TotalJobsStopped, 1)
 
@@ -253,7 +261,7 @@ func (jr *SignalFlowJobRunner) watchJob(comp *signalflow.Computation, program st
 			if comp.Err() != nil || !ok {
 				atomic.AddInt64(&jr.TotalJobsErrored, 1)
 
-				klog.Errorf("SignalFlow job errored, restarting in a bit: %v", comp.Err())
+				klog.Errorf("SignalFlow job errored, restarting %v in a bit: %v", comp.Handle(), comp.Err())
 
 				for {
 					time.Sleep(5 * time.Second)

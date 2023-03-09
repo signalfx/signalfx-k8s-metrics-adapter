@@ -42,6 +42,7 @@ spec:
         - /adapter
         - --secure-port=6443
         - --stream-url={{ .Values.streamURL }}
+        - --metadata-timeout={{ .Values.metadataTimeout | default "10s" }}
         - --logtostderr=true
         - --v={{ .Values.logVerbosity | default "5" }}
         {{ end }}

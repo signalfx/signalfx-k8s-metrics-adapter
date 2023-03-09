@@ -113,6 +113,9 @@ func main() {
 	var minimumTimeseriesExpiry time.Duration
 	cmd.Flags().DurationVar(&minimumTimeseriesExpiry, "minimum-ts-expiry", 30*time.Second, "The minimum duration in which no data is received for a timeseries before that timeseries is expired and no longer reports data to K8s.  The default is 3 times the reported data resolution in the SignalFlow job.")
 
+	var metadataTimeout time.Duration
+	cmd.Flags().DurationVar(&metadataTimeout, "metadata-timeout", 10*time.Second, "The amount of time to wait for a submitted job to receive its metadata from the server.")
+
 	klog.InitFlags(nil) // initalize klog flags
 
 	cmd.Flags().AddGoFlagSet(flag.CommandLine) // make sure we get the klog flags
@@ -135,6 +138,7 @@ func main() {
 	}
 
 	jobRunner := internal.NewSignalFlowJobRunner(flowClient)
+	jobRunner.MetadataTimeout = metadataTimeout
 	jobRunner.MinimumTimeseriesExpiry = minimumTimeseriesExpiry
 	go jobRunner.Run(context.Background())
 
