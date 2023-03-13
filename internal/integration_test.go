@@ -125,6 +125,7 @@ func providerWithBackend(t *testing.T, conf *testConfig) (*SignalFxProvider, kub
 	jobRunner := NewSignalFlowJobRunner(client)
 	jobRunner.CleanupOldTSIDsInterval = 2 * time.Second
 	jobRunner.MinimumTimeseriesExpiry = conf.MinimumTimeseriesExpiry()
+	jobRunner.MetadataTimeout = 10 * time.Second
 	go jobRunner.Run(ctx)
 
 	registry := NewRegistry(jobRunner)
