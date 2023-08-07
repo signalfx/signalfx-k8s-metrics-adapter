@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"sync"
 
 	"github.com/signalfx/golib/datapoint"
@@ -23,21 +24,21 @@ func NewRegistry(jobRunner *SignalFlowJobRunner) *Registry {
 	}
 }
 
-func (r *Registry) HandleHPAUpdated(updatedMetrics []HPAMetric) {
+func (r *Registry) HandleHPAUpdated(ctx context.Context, updatedMetrics []HPAMetric) {
 	r.Lock()
 	defer r.Unlock()
 
 	for i := range updatedMetrics {
 		m := updatedMetrics[i]
 		r.metricsByKey[m.Key()] = &m
-		err := r.jobRunner.ReplaceOrStartJob(m.SignalFlowProgram())
+		err := r.jobRunner.ReplaceOrStartJob(ctx, m.SignalFlowProgram())
 		if err != nil {
 			klog.Errorf("failed to start SignalFlow computation (%s): %v", m.SignalFlowProgram(), err)
 		}
 	}
 }
 
-func (r *Registry) HandleHPADeleted(deletedMetrics []HPAMetric) {
+func (r *Registry) HandleHPADeleted(ctx context.Context, deletedMetrics []HPAMetric) {
 	r.Lock()
 	defer r.Unlock()
 

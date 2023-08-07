@@ -10,8 +10,8 @@ import (
 
 	"github.com/signalfx/golib/pointer"
 	"github.com/signalfx/signalfx-go/idtool"
-	"github.com/signalfx/signalfx-go/signalflow"
-	"github.com/signalfx/signalfx-go/signalflow/messages"
+	"github.com/signalfx/signalfx-go/signalflow/v2"
+	"github.com/signalfx/signalfx-go/signalflow/v2/messages"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v2"

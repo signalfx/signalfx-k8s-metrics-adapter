@@ -24,7 +24,7 @@ import (
 	"k8s.io/klog"
 )
 
-type HPACallback func(ms []HPAMetric)
+type HPACallback func(ctx context.Context, ms []HPAMetric)
 
 type HPADiscoverer struct {
 	client         kubernetes.Interface
@@ -65,7 +65,7 @@ func (d *HPADiscoverer) Discover(ctx context.Context) {
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				metrics := d.updateHPA(ctx, obj.(*autoscaling.HorizontalPodAutoscaler))
-				d.updateCallback(metrics)
+				d.updateCallback(ctx, metrics)
 
 				if len(metrics) > 0 {
 					d.totalHPAsWithMetrics++
@@ -83,10 +83,10 @@ func (d *HPADiscoverer) Discover(ctx context.Context) {
 					return
 				}
 				oldMetrics := d.metricConfig[newHPA.UID]
-				d.deleteCallback(oldMetrics)
+				d.deleteCallback(ctx, oldMetrics)
 
 				newMetrics := d.updateHPA(ctx, newHPA)
-				d.updateCallback(newMetrics)
+				d.updateCallback(ctx, newMetrics)
 
 				if len(oldMetrics) != len(newMetrics) {
 					d.totalMetricsTracked += int64(len(newMetrics) - len(oldMetrics))
@@ -107,7 +107,7 @@ func (d *HPADiscoverer) Discover(ctx context.Context) {
 					d.totalMetricsTracked -= int64(len(metrics))
 				}
 
-				d.deleteCallback(metrics)
+				d.deleteCallback(ctx, metrics)
 			},
 		})
 
