@@ -12,7 +12,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/signalfx/golib/datapoint"
 	"github.com/signalfx/golib/sfxclient"
-	autoscaling "k8s.io/api/autoscaling/v2beta2"
+	autoscaling "k8s.io/api/autoscaling/v2"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -56,7 +56,7 @@ func NewHPADiscoverer(client kubernetes.Interface, updateCallback HPACallback, d
 }
 
 func (d *HPADiscoverer) Discover(ctx context.Context) {
-	watchList := cache.NewListWatchFromClient(d.client.AutoscalingV2beta2().RESTClient(), "horizontalpodautoscalers", "", fields.Everything())
+	watchList := cache.NewListWatchFromClient(d.client.AutoscalingV2().RESTClient(), "horizontalpodautoscalers", "", fields.Everything())
 
 	_, controller := cache.NewInformer(
 		watchList,
