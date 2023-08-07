@@ -22,7 +22,7 @@ namespace** due to how Kubernetes queries the adapter for them.
 ## Example HPA
 
 ```yaml
-apiVersion: autoscaling/v2beta2
+apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   annotations:
@@ -129,7 +129,7 @@ example, if you have an HPA on a work queue service and wanted to scale based
 on the maximum size of the queue in any single worker pod:
 
 ```yaml
-apiVersion: autoscaling/v2beta2
+apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   annotations:

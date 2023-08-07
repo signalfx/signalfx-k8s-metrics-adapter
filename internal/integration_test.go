@@ -14,7 +14,7 @@ import (
 	"github.com/signalfx/signalfx-go/signalflow/messages"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv1 "k8s.io/api/autoscaling/v2beta2"
+	autoscalingv1 "k8s.io/api/autoscaling/v2"
 	apiv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -198,7 +198,7 @@ func TestPodMetrics(t *testing.T) {
 	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	hpa, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
+	hpa, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
@@ -370,7 +370,7 @@ func TestPodMetrics(t *testing.T) {
 
 	// DELETE THE HPA
 
-	err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Delete(ctx, hpa.Name, metav1.DeleteOptions{})
+	err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Delete(ctx, hpa.Name, metav1.DeleteOptions{})
 	require.Nil(t, err)
 
 	require.True(t, waitFor(5*time.Second, func() bool {
@@ -434,7 +434,7 @@ func TestObjectMetrics(t *testing.T) {
 	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
+	_, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	tsid := idtool.ID(rand.Int63())
@@ -544,7 +544,7 @@ func TestExternalMetrics(t *testing.T) {
 	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
+	_, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	var metric *external_metrics.ExternalMetricValueList
@@ -654,7 +654,7 @@ func TestCustomMetricWhitelist(t *testing.T) {
 	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
+	_, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
@@ -810,7 +810,7 @@ func TestRestartJobOnSignalFlowError(t *testing.T) {
 	_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
+	_, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	var metric *external_metrics.ExternalMetricValueList
@@ -906,7 +906,7 @@ func TestMultipleHPAs(t *testing.T) {
 		_, err := k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 		require.Nil(t, err)
 
-		_, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
+		_, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 		require.Nil(t, err)
 
 		tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
@@ -1043,7 +1043,7 @@ func TestMinimumExpiry(t *testing.T) {
 	_, err = k8sClient.AppsV1().Deployments(testNamespace).Create(ctx, deployment, metav1.CreateOptions{})
 	require.Nil(t, err)
 
-	hpa, err = k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
+	hpa, err = k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Create(ctx, hpa, metav1.CreateOptions{})
 	require.Nil(t, err)
 
 	tsids := []idtool.ID{idtool.ID(rand.Int63()), idtool.ID(rand.Int63())}
@@ -1121,14 +1121,14 @@ func waitFor(timeout time.Duration, f func() bool) bool {
 // Retries on 409 errors
 func updateHPA(ctx context.Context, k8sClient kubernetes.Interface, name string, updater func(hpa *autoscalingv1.HorizontalPodAutoscaler)) (*autoscalingv1.HorizontalPodAutoscaler, error) {
 	for {
-		hpa, err := k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Get(ctx, name, metav1.GetOptions{})
+		hpa, err := k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
 
 		updater(hpa)
 
-		newHPA, err := k8sClient.AutoscalingV2beta2().HorizontalPodAutoscalers(testNamespace).Update(ctx, hpa, metav1.UpdateOptions{})
+		newHPA, err := k8sClient.AutoscalingV2().HorizontalPodAutoscalers(testNamespace).Update(ctx, hpa, metav1.UpdateOptions{})
 		if err != nil {
 			if se, ok := err.(*apierrors.StatusError); ok {
 				if se.Status().Code == 409 {
