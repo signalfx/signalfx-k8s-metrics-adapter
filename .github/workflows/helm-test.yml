@@ -13,7 +13,7 @@ env:
   REGISTRY: "quay.io/signalfx"
   IMAGE_NAME: "k8s-metrics-adapter"
   IMAGE_VERSION: "latest"
-  GO_VERSION: "1.19.0"
+  GO_VERSION: "1.20.3"
   MINIKUBE_VERSION: "v1.28.0"
   HELM_VERSION: "v3.9.0"
 

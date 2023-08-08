@@ -10,8 +10,8 @@ import (
 	"github.com/signalfx/golib/datapoint"
 	"github.com/signalfx/golib/sfxclient"
 	"github.com/signalfx/signalfx-go/idtool"
-	"github.com/signalfx/signalfx-go/signalflow"
-	"github.com/signalfx/signalfx-go/signalflow/messages"
+	"github.com/signalfx/signalfx-go/signalflow/v2"
+	"github.com/signalfx/signalfx-go/signalflow/v2/messages"
 	"k8s.io/klog"
 )
 
@@ -97,8 +97,8 @@ func NewSignalFlowJobRunner(client *signalflow.Client) *SignalFlowJobRunner {
 	}
 }
 
-func (jr *SignalFlowJobRunner) ReplaceOrStartJob(program string) error {
-	comp, err := jr.client.Execute(&signalflow.ExecuteRequest{
+func (jr *SignalFlowJobRunner) ReplaceOrStartJob(ctx context.Context, program string) error {
+	comp, err := jr.client.Execute(ctx, &signalflow.ExecuteRequest{
 		Program: program,
 	})
 	if err != nil {
@@ -106,18 +106,16 @@ func (jr *SignalFlowJobRunner) ReplaceOrStartJob(program string) error {
 		return err
 	}
 
-	comp.MetadataTimeout = jr.MetadataTimeout
 	// Wait for the handle to come through before sending the message to block
 	// the loop less.
-	handle := comp.Handle()
-	if handle == "" {
+	handle, err := comp.Handle(ctx)
+	if err != nil {
 		// It's possible that the job has already started but the server was delayed sending the handle
 		// to avoid leaking jobs, issue delete using the channel name, ie: detach.
-		err = comp.Detach()
-		if err != nil {
+		if err := comp.Detach(ctx); err != nil {
 			klog.Errorf("Failed to clean up job that is missing its handle: %v", err)
 		}
-		return fmt.Errorf("Could not get job handle within timeout: %v", comp.Err())
+		return fmt.Errorf("Could not get job handle: %v", err)
 	}
 
 	jr.startedCh <- startedMsg{
@@ -129,7 +127,7 @@ func (jr *SignalFlowJobRunner) ReplaceOrStartJob(program string) error {
 	klog.Infof("Started SignalFlow compuation: %s (handle: %s)", program, handle)
 	atomic.AddInt64(&jr.TotalJobsStarted, 1)
 
-	go jr.watchJob(comp, program)
+	go jr.watchJob(ctx, comp, program)
 
 	return nil
 }
@@ -168,14 +166,19 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 			klog.Infof("Stopping SignalFlow compuation: %s", stoppedProgram)
 
 			// detach and stop are equivalent and the recommended method from backend team is to use detach
-			err := comp.Detach()
+			err := comp.Detach(ctx)
 			if err != nil {
 				klog.Errorf("Failed to detach SignalFlow job %s: %v", stoppedProgram, err)
 			}
 			atomic.AddInt64(&jr.TotalJobsStopped, 1)
 
 			delete(jr.jobsByProgram, stoppedProgram)
-			delete(jr.jobsByHandle, comp.Handle())
+			handle, err := comp.Handle(ctx)
+			if err != nil {
+				klog.Errorf("Failed to get job handle: %v", err)
+				continue
+			}
+			delete(jr.jobsByHandle, handle)
 
 		case data := <-jr.dataCh:
 			snapshot := jr.metricSnapshotsByHandle[data.handle]
@@ -201,10 +204,17 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 					klog.Errorf("Metric from %v has unexpected type", data)
 					continue
 				}
+				tsidCtx, cancel := context.WithTimeout(ctx, jr.MetadataTimeout)
+				tsidMeta, err := comp.TSIDMetadata(tsidCtx, payload.TSID)
+				cancel()
+				if err != nil {
+					klog.Errorf("Failed to get tsid metadata: %v", tsidMeta)
+					continue
+				}
 				snapshot[payload.TSID] = &TSIDValueMetadata{
 					TSID:       payload.TSID,
 					Val:        val,
-					Metadata:   comp.TSIDMetadata(payload.TSID),
+					Metadata:   tsidMeta,
 					Timestamp:  data.msg.Timestamp(),
 					Resolution: data.resolution,
 				}
@@ -218,8 +228,13 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 				}
 				continue
 			}
+			handle, err := comp.Handle(ctx)
+			if err != nil {
+				klog.Errorf("Failed to get job handle: %v", err)
+				continue
+			}
 			dataReq.respCh <- dataResponse{
-				snapshot: jr.metricSnapshotsByHandle[comp.Handle()],
+				snapshot: jr.metricSnapshotsByHandle[handle],
 				err:      nil,
 			}
 		case <-cleanupTicker.C:
@@ -248,7 +263,7 @@ func (jr *SignalFlowJobRunner) Run(ctx context.Context) {
 	}
 }
 
-func (jr *SignalFlowJobRunner) watchJob(comp *signalflow.Computation, program string) {
+func (jr *SignalFlowJobRunner) watchJob(ctx context.Context, comp *signalflow.Computation, program string) {
 	if jr.ctx == nil {
 		panic("must start job runner before running programs")
 	}
@@ -261,11 +276,16 @@ func (jr *SignalFlowJobRunner) watchJob(comp *signalflow.Computation, program st
 			if comp.Err() != nil || !ok {
 				atomic.AddInt64(&jr.TotalJobsErrored, 1)
 
-				klog.Errorf("SignalFlow job errored, restarting %v in a bit: %v", comp.Handle(), comp.Err())
+				handle, err := comp.Handle(ctx)
+				if err != nil {
+					klog.Errorf("Failed to get job handle: %v", err)
+					continue
+				}
+				klog.Errorf("SignalFlow job errored, restarting %v in a bit: %v", handle, comp.Err())
 
 				for {
 					time.Sleep(5 * time.Second)
-					err := jr.ReplaceOrStartJob(program)
+					err := jr.ReplaceOrStartJob(ctx, program)
 					if err == nil {
 						break
 					}
@@ -274,10 +294,20 @@ func (jr *SignalFlowJobRunner) watchJob(comp *signalflow.Computation, program st
 				return
 			}
 
+			handle, err := comp.Handle(ctx)
+			if err != nil {
+				klog.Errorf("Failed to get job handle: %v", err)
+				continue
+			}
+			res, err := comp.Resolution(ctx)
+			if err != nil {
+				klog.Errorf("Failed to get job resolution: %v", err)
+				continue
+			}
 			jr.dataCh <- newDataMsg{
 				msg:        msg,
-				handle:     comp.Handle(),
-				resolution: comp.Resolution(),
+				handle:     handle,
+				resolution: res,
 			}
 		}
 	}

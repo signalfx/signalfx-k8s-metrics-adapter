@@ -1,4 +1,4 @@
-FROM golang:1.19 as builder
+FROM golang:1.20 as builder
 
 # upgrade to get latest root CA
 RUN apt-get update && \

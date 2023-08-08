@@ -29,7 +29,7 @@ import (
 
 	"github.com/signalfx/golib/datapoint"
 	"github.com/signalfx/golib/sfxclient"
-	"github.com/signalfx/signalfx-go/signalflow"
+	"github.com/signalfx/signalfx-go/signalflow/v2"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/component-base/logs"
