@@ -108,7 +108,9 @@ func (jr *SignalFlowJobRunner) ReplaceOrStartJob(ctx context.Context, program st
 
 	// Wait for the handle to come through before sending the message to block
 	// the loop less.
-	handle, err := comp.Handle(ctx)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, jr.MetadataTimeout)
+	handle, err := comp.Handle(ctxWithTimeout)
+	cancel()
 	if err != nil {
 		// It's possible that the job has already started but the server was delayed sending the handle
 		// to avoid leaking jobs, issue delete using the channel name, ie: detach.
