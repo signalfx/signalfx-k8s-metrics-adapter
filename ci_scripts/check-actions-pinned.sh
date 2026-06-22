@@ -23,7 +23,7 @@ while IFS= read -r line; do
     ./*|*echo*|*grep*|*sed*|"") continue ;;
   esac
 
-  if ! echo "$ref" | grep -qE '@[0-9a-f]{40}'; then
+  if ! echo "$ref" | grep -qE '@[0-9a-fA-F]{40}($|[[:space:]]|#)'; then
     echo "FAIL: ${file}:${lineno} - ${ref}"
     errors=$((errors + 1))
   fi
