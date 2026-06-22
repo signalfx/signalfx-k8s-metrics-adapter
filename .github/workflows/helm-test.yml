@@ -144,14 +144,6 @@ jobs:
       - name: Run test
         run: |
           set -xo pipefail
-          wait_for() {
-              start_time=$(date +%s)
-              while [ $(expr `date +%s` - $start_time) -lt 60 ]; do
-                  ( "$@" ) && return 0
-                  sleep 2
-              done
-              return 1
-          }
           helm install \
               --generate-name \
               --set accessToken=testing123 \
@@ -161,13 +153,29 @@ jobs:
               -f ./deployments/helm/signalfx-k8s-metrics-adapter/values.yaml \
               ./deployments/helm/signalfx-k8s-metrics-adapter
           release_name=$(helm list --short)
-          wait_for bash -eco pipefail "helm status $release_name -o json | jq -r '.info.status' | grep -iq deployed" || \
-              (echo "Timed out waiting for helm chart to be deployed!" && helm status $release_name && exit 1)
-          selector="--selector app=signalfx-k8s-metrics-adapter"
-          pod_is_running="kubectl get pods $selector --output=jsonpath={.items..status.phase} | grep -iq running"
-          wait_for bash -eco pipefail "$pod_is_running" || \
-              (echo "Timed out waiting for adapter pod to be running!" && kubectl describe pod $selector && exit 1)
+          deployment_deadline=$(( $(date +%s) + 60 ))
+          until helm status "$release_name" -o json | jq -r '.info.status' | grep -iq deployed; do
+            if [ "$(date +%s)" -ge "$deployment_deadline" ]; then
+              echo "Timed out waiting for helm chart to be deployed!"
+              helm status "$release_name"
+              exit 1
+            fi
+            sleep 2
+          done
+          selector="app=signalfx-k8s-metrics-adapter"
+          pod_deadline=$(( $(date +%s) + 60 ))
+          until kubectl get pods --selector "$selector" --output=jsonpath='{.items..status.phase}' | grep -iq running; do
+            if [ "$(date +%s)" -ge "$pod_deadline" ]; then
+              echo "Timed out waiting for adapter pod to be running!"
+              kubectl describe pod --selector "$selector"
+              exit 1
+            fi
+            sleep 2
+          done
           # check if the pod is still running after 10 seconds
           sleep 10
-          bash -eco pipefail "$pod_is_running" || \
-              (echo "Adaptor pod no longer running!" && kubectl describe pod $selector && exit 1)
+          if ! kubectl get pods --selector "$selector" --output=jsonpath='{.items..status.phase}' | grep -iq running; then
+            echo "Adaptor pod no longer running!"
+            kubectl describe pod --selector "$selector"
+            exit 1
+          fi

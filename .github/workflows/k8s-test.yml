@@ -15,7 +15,7 @@ permissions:
 jobs:
   k8s-test:
     name: k8s-test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         K8S_VERSION: [ "v1.23.0",  "v1.24.0", "v1.25.0", "v1.26.0" ]
