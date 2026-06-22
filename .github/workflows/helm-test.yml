@@ -175,7 +175,7 @@ jobs:
           # check if the pod is still running after 10 seconds
           sleep 10
           if ! kubectl get pods --selector "$selector" --output=jsonpath='{.items..status.phase}' | grep -iq running; then
-            echo "Adaptor pod no longer running!"
+            echo "Adapter pod no longer running!"
             kubectl describe pod --selector "$selector"
             exit 1
           fi
