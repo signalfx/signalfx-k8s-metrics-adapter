@@ -1,4 +1,5 @@
-FROM golang:1.20 as builder
+ARG GO_VERSION=1.26.4
+FROM golang:${GO_VERSION} AS builder
 
 # upgrade to get latest root CA
 RUN apt-get update && \
