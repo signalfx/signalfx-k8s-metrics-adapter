@@ -24,13 +24,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/signalfx/golib/datapoint"
 	"github.com/signalfx/golib/sfxclient"
 	"github.com/signalfx/signalfx-go/signalflow/v2"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/component-base/logs"
 	"k8s.io/klog"
@@ -49,7 +50,7 @@ type SignalFxAdapter struct {
 	provider   *internal.SignalFxProvider
 }
 
-func (a *SignalFxAdapter) makeProviderOrDie(registry *internal.Registry) provider.MetricsProvider {
+func (a *SignalFxAdapter) makeProviderOrDie(ctx context.Context, registry *internal.Registry) provider.MetricsProvider {
 	k8sConf, err := a.ClientConfig()
 	if err != nil {
 		klog.Fatalf("could not get k8s client config: %v", err)
@@ -65,7 +66,7 @@ func (a *SignalFxAdapter) makeProviderOrDie(registry *internal.Registry) provide
 	}
 
 	a.discoverer = internal.NewHPADiscoverer(k8sClient, registry.HandleHPAUpdated, registry.HandleHPADeleted, mapper)
-	go a.discoverer.Discover(context.Background())
+	go a.discoverer.Discover(ctx)
 
 	a.provider = internal.NewSignalFxProvider(registry, mapper)
 	return a.provider
@@ -137,14 +138,17 @@ func main() {
 		return
 	}
 
+	appCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	jobRunner := internal.NewSignalFlowJobRunner(flowClient)
 	jobRunner.MetadataTimeout = metadataTimeout
 	jobRunner.MinimumTimeseriesExpiry = minimumTimeseriesExpiry
-	go jobRunner.Run(context.Background())
+	go jobRunner.Run(appCtx)
 
 	registry := internal.NewRegistry(jobRunner)
 
-	provider := cmd.makeProviderOrDie(registry)
+	provider := cmd.makeProviderOrDie(appCtx, registry)
 	cmd.WithCustomMetrics(provider)
 	cmd.WithExternalMetrics(provider)
 
@@ -154,7 +158,7 @@ func main() {
 		// Open port for POSTing fake metrics
 		klog.Fatal(http.ListenAndServe(":8080", nil))
 	}()
-	if err := cmd.Run(wait.NeverStop); err != nil {
+	if err := cmd.Run(appCtx); err != nil {
 		klog.Fatalf("unable to run custom metrics adapter: %v", err)
 	}
 }
