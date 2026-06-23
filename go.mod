@@ -1,6 +1,6 @@
 module github.com/signalfx/signalfx-k8s-metrics-adapter
 
-go 1.20
+go 1.26.4
 
 require (
 	github.com/davecgh/go-spew v1.1.1
