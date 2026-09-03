@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.26.8
 FROM golang:${GO_VERSION} AS builder
 
 # upgrade to get latest root CA
@@ -13,8 +13,10 @@ COPY Makefile ./
 COPY ./cmd/ ./cmd/
 COPY ./internal ./internal/
 
-RUN make adapter
+ARG ARCH=amd64
+ENV ARCH=${ARCH}
 
+RUN make adapter
 
 # FINAL IMAGE
 FROM busybox:1.31
