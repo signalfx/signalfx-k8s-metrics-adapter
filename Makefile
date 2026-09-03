@@ -16,5 +16,5 @@ test:
 	CGO_ENABLED=0 go test -v ./cmd/... ./internal/...
 
 image:
-	docker build --build-arg GO_VERSION=$(GO_VERSION) -t $(REGISTRY)/$(IMAGE):$(VERSION) .
+	docker build --platform=$(OS)/$(ARCH) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) -t $(REGISTRY)/$(IMAGE):$(VERSION) .
 	if [[ "$(PUSH)" == "yes" ]]; then docker push $(REGISTRY)/$(IMAGE):$(VERSION); fi
