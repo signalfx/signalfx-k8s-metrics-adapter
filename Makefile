@@ -56,3 +56,4 @@ test-helm: ## Load the built adapter image and test Helm installation on the sel
 	$(KIND) load docker-image $(REGISTRY)/$(IMAGE):$(VERSION) --name=$(KIND_CLUSTER_NAME)
 	$(TEST_ENV) $(HELM) upgrade --install adapter-test ./deployments/helm/signalfx-k8s-metrics-adapter --set accessToken=testing123 --set image=$(REGISTRY)/$(IMAGE) --set imageTag=$(VERSION) --set imagePullPolicy=Never --wait --timeout=3m
 	$(TEST_ENV) $(KUBECTL) wait --for=condition=Available apiservice/v1beta1.custom.metrics.k8s.io apiservice/v1beta2.custom.metrics.k8s.io apiservice/v1beta1.external.metrics.k8s.io --timeout=180s
+	$(TEST_ENV) $(HELM) get manifest adapter-test | $(TEST_ENV) $(KUBECTL) get -f -
