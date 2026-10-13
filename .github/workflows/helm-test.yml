@@ -16,67 +16,82 @@ env:
   REGISTRY: "quay.io/signalfx"
   IMAGE_NAME: "k8s-metrics-adapter"
   IMAGE_VERSION: "latest"
-  MINIKUBE_VERSION: "v1.28.0"
-  HELM_VERSION: "v3.9.0"
 
 jobs:
+  get-test-matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.test-matrix.outputs.matrix }}
+      kind-version: ${{ steps.tool-versions.outputs.kind-version }}
+      helm-version: ${{ steps.tool-versions.outputs.helm-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Get test matrix
+        id: test-matrix
+        run: echo "matrix=$(jq -c '.kubernetes_test' ci-matrix.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Get tool versions
+        id: tool-versions
+        run: make ci-tool-versions >> "$GITHUB_OUTPUT"
+
   build-image:
     name: build-image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - name: Check out the codebase.
+      - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Build image
         run: |
           PUSH=no make image
           mkdir -p dist
-          docker save -o dist/image.tar ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_VERSION }}
+          docker save -o dist/image.tar "${REGISTRY}/${IMAGE_NAME}:${IMAGE_VERSION}"
 
       - name: Save image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image
           path: ./dist/image.tar
+          if-no-files-found: error
+          retention-days: 1
 
   helm-lint:
     name: helm-lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: get-test-matrix
     steps:
-      - name: Check out the codebase.
+      - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Cache helm
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          path: /tmp/helm.tar.gz
-          key: v1-helm-binary-${{ env.HELM_VERSION }}
+          version: ${{ needs.get-test-matrix.outputs.helm-version }}
 
-      - name: Install helm
-        run: |
-          if [[ ! -e "/tmp/helm.tar.gz" ]]; then
-            wget -q -O "/tmp/helm.tar.gz" https://get.helm.sh/helm-${{ env.HELM_VERSION }}-linux-amd64.tar.gz
-          fi
-          sudo tar -zxf /tmp/helm.tar.gz -C /tmp
-          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
-          sudo chmod a+x /usr/local/bin/helm
-
-      - name: helm lint
-        run: |
-          helm lint ./deployments/helm/signalfx-k8s-metrics-adapter || \
-            (echo 'Helm lint issues found!' && exit 1)
+      - name: Helm lint
+        run: helm lint --strict --set accessToken=testing123 ./deployments/helm/signalfx-k8s-metrics-adapter
 
   helm-test:
-    name: helm-test
-    runs-on: ubuntu-latest
+    name: helm-test (${{ matrix.k8s-kind-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     needs:
+      - get-test-matrix
       - helm-lint
       - build-image
     strategy:
-      matrix:
-        K8S_VERSION: [ "v1.24.0", "v1.25.0" ]
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.get-test-matrix.outputs.matrix) }}
+    env:
+      K8S_VERSION: ${{ matrix.k8s-kind-version }}
+      KIND_CLUSTER_NAME: metrics-adapter-test
+      KUBECONFIG_TEST: /tmp/kube-config-signalfx-k8s-metrics-adapter-tests
     steps:
-      - name: Check out the codebase.
+      - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Download image
@@ -88,93 +103,20 @@ jobs:
       - name: Load image
         run: docker load -i ./dist/image.tar
 
-      - name: Cache kubectl
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
-          path: /tmp/kubectl
-          key: v1-kubectl-binary-${{ matrix.K8S_VERSION }}
+          version: ${{ needs.get-test-matrix.outputs.helm-version }}
 
-      - name: Download kubectl
-        run: |
-          if [[ ! -e "/tmp/kubectl" ]]; then
-            wget -q -O "/tmp/kubectl" https://storage.googleapis.com/kubernetes-release/release/${{ matrix.K8S_VERSION }}/bin/linux/amd64/kubectl
-          fi
-          sudo install /tmp/kubectl /usr/local/bin/kubectl
-          sudo chmod a+x /usr/local/bin/kubectl
-
-      - name: Cache helm
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - name: Create Kind cluster
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
-          path: /tmp/helm.tar.gz
-          key: v1-helm-binary-${{ env.HELM_VERSION }}
+          version: ${{ needs.get-test-matrix.outputs.kind-version }}
+          node_image: kindest/node:${{ matrix.k8s-kind-version }}
+          kubectl_version: ${{ matrix.k8s-kind-version }}
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          kubeconfig: ${{ env.KUBECONFIG_TEST }}
+          wait: 180s
 
-      - name: Install helm
-        run: |
-          if [[ ! -e "/tmp/helm.tar.gz" ]]; then
-            wget -q -O "/tmp/helm.tar.gz" https://get.helm.sh/helm-${{ env.HELM_VERSION }}-linux-amd64.tar.gz
-          fi
-          sudo tar -zxf /tmp/helm.tar.gz -C /tmp
-          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
-          sudo chmod a+x /usr/local/bin/helm
-
-      - name: Cache minikube
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: /tmp/minikube
-          key: v1-minikube-binary-${{ env.MINIKUBE_VERSION }}
-
-      - name: Download minikube
-        run: |
-          if [[ ! -e "/tmp/minikube" ]]; then
-            wget -q -O "/tmp/minikube" https://storage.googleapis.com/minikube/releases/${{ env.MINIKUBE_VERSION }}/minikube-linux-amd64
-          fi
-          sudo install /tmp/minikube /usr/local/bin/minikube
-          sudo chmod a+x /usr/local/bin/minikube
-          sudo sysctl fs.protected_regular=0
-
-      - name: Start minikube
-        run: |
-          minikube start --container-runtime=docker --cpus 2 --memory 4096 --kubernetes-version=${{ matrix.K8S_VERSION }} --no-vtx-check
-          export JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'
-          until kubectl get nodes -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do
-            sleep 1;
-          done
-
-      - name: Run test
-        run: |
-          set -xo pipefail
-          helm install \
-              --generate-name \
-              --set accessToken=testing123 \
-              --set image=quay.io/signalfx/k8s-metrics-adapter \
-              --set imageTag=latest \
-              --set imagePullPolicy=IfNotPresent \
-              -f ./deployments/helm/signalfx-k8s-metrics-adapter/values.yaml \
-              ./deployments/helm/signalfx-k8s-metrics-adapter
-          release_name=$(helm list --short)
-          deployment_deadline=$(( $(date +%s) + 60 ))
-          until helm status "$release_name" -o json | jq -r '.info.status' | grep -iq deployed; do
-            if [ "$(date +%s)" -ge "$deployment_deadline" ]; then
-              echo "Timed out waiting for helm chart to be deployed!"
-              helm status "$release_name"
-              exit 1
-            fi
-            sleep 2
-          done
-          selector="app=signalfx-k8s-metrics-adapter"
-          pod_deadline=$(( $(date +%s) + 60 ))
-          until kubectl get pods --selector "$selector" --output=jsonpath='{.items..status.phase}' | grep -iq running; do
-            if [ "$(date +%s)" -ge "$pod_deadline" ]; then
-              echo "Timed out waiting for adapter pod to be running!"
-              kubectl describe pod --selector "$selector"
-              exit 1
-            fi
-            sleep 2
-          done
-          # check if the pod is still running after 10 seconds
-          sleep 10
-          if ! kubectl get pods --selector "$selector" --output=jsonpath='{.items..status.phase}' | grep -iq running; then
-            echo "Adapter pod no longer running!"
-            kubectl describe pod --selector "$selector"
-            exit 1
-          fi
+      - name: Run Helm test
+        run: make test-helm IMAGE="${IMAGE_NAME}" VERSION="${IMAGE_VERSION}"
