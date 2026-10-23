@@ -7,6 +7,8 @@ ARCH?=amd64
 OS?=linux
 GO_VERSION?=$(shell awk '/^go / { print $$2; exit }' go.mod)
 VERSION?=latest
+# Additional tags applied to the same build (same digest), e.g. EXTRA_TAGS=latest
+EXTRA_TAGS?=
 
 # Versions used by CI setup actions and the optional local installer.
 KIND_VERSION?=v0.33.0
@@ -31,8 +33,8 @@ test:
 	CGO_ENABLED=0 go test -v -count=1 -timeout=10m ./cmd/... ./internal/...
 
 image:
-	docker build --platform=$(OS)/$(ARCH) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) -t $(REGISTRY)/$(IMAGE):$(VERSION) .
-	if [ "$(PUSH)" = "yes" ]; then docker push $(REGISTRY)/$(IMAGE):$(VERSION); fi
+	docker build --platform=$(OS)/$(ARCH) --build-arg GO_VERSION=$(GO_VERSION) --build-arg ARCH=$(ARCH) -t $(REGISTRY)/$(IMAGE):$(VERSION) $(foreach t,$(EXTRA_TAGS),-t $(REGISTRY)/$(IMAGE):$(t)) .
+	if [[ "$(PUSH)" == "yes" ]]; then for t in $(VERSION) $(EXTRA_TAGS); do docker push $(REGISTRY)/$(IMAGE):$$t || exit 1; done; fi
 
 install-tools: ## Optionally install pinned kubectl, Kind, and Helm into LOCALBIN.
 	LOCALBIN="$(LOCALBIN)" K8S_VERSION=$(K8S_VERSION) KIND_VERSION=$(KIND_VERSION) HELM_VERSION=$(HELM_VERSION) bash ci_scripts/install-tools.sh
