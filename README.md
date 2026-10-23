@@ -195,10 +195,37 @@ kubeconfig file:
 `./adapter --lister-kubeconfig ~/.kube/cluster-1 --authentication-kubeconfig ~/.kube/cluster-1 --authorization-kubeconfig ~/.kube/cluster-1 --secure-port 6443 --bind-address 127.0.0.1 --signalfx-realm us0`
 
 ### Integration Tests
-The main form of automated testing for this project is integration tests that
-run against a real K8s cluster.  It will by default use the same cluster that
-`kubectl` would use on that shell, so set `KUBECONFIG` and the current context
-appropriately before running.
+The integration tests run against a real Kubernetes cluster. CI and local testing
+follow the [Splunk OpenTelemetry Collector chart](https://github.com/signalfx/splunk-otel-collector-chart)
+conventions: a shared `ci-matrix.json`, Kind clusters, and Make targets for local
+setup and cleanup.
+
+With Docker, Go, jq, Kind, kubectl, and Helm available on PATH, run:
+
+```sh
+make test-integration
+PUSH=no make image
+make test-helm
+make kind-delete
+```
+
+Cluster setup uses the tools already on PATH and does not install or upgrade them.
+For the pinned CI tool versions, optionally run `make install-tools` (requires curl).
+This downloads kubectl, Kind, and Helm into the repository's `bin` directory.
+To use those binaries for a command, explicitly set `PATH="$PWD/bin:$PATH"`, for
+example `PATH="$PWD/bin:$PATH" make test-integration`. It does not change your shell
+configuration or system installations.
+
+The default Kubernetes version comes from `ci-matrix.json`. Keep the matrix on
+non-EOL release lines with node images supported by the selected Kind release.
+Override `K8S_VERSION` consistently across cluster commands to test another matrix version, for example
+`make test-integration K8S_VERSION=v1.35.8`.
+On an ARM machine, pass `ARCH=arm64` when building the adapter image.
+
+The test kubeconfig is stored in `.test-cluster/kubeconfig`; override
+`KUBECONFIG_TEST` to choose another path. Clusters remain available for inspection
+until `make kind-delete` is run. `make test` uses the cluster selected by
+`KUBECONFIG` and the current context.
 
 ### Release Checklist
  - Tag new version as `v<new_version`.

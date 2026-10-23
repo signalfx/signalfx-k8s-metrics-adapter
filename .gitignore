@@ -2,3 +2,5 @@
 *~
 adapter
 vendor/
+bin/
+.test-cluster/
