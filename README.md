@@ -202,7 +202,10 @@ appropriately before running.
 
 ### Release Checklist
  - Tag new version as `v<new_version`.
- - Push `quay.io/signalfx/k8s-metrics-adapter:<new_version>` to Quay.io repo
+ - Push `quay.io/signalfx/k8s-metrics-adapter:<new_version>` to Quay.io repo.
+   To also update `latest` with the exact same image (same digest), build once
+   with extra tags instead of running `make image` twice:
+   `make image PUSH=yes VERSION=<new_version> EXTRA_TAGS=latest`
  - Make Github release describing changes
 
 ## Helpful Resources
