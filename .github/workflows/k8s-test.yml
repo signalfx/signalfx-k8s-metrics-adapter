@@ -13,69 +13,55 @@ permissions:
   contents: read
 
 jobs:
-  k8s-test:
-    name: k8s-test
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        K8S_VERSION: [ "v1.23.0",  "v1.24.0", "v1.25.0", "v1.26.0" ]
-    env:
-      MINIKUBE_VERSION: v1.31.1
-
+  get-test-matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.test-matrix.outputs.matrix }}
+      kind-version: ${{ steps.tool-versions.outputs.kind-version }}
+      helm-version: ${{ steps.tool-versions.outputs.helm-version }}
     steps:
-      - name: Check out the codebase.
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Get test matrix
+        id: test-matrix
+        run: echo "matrix=$(jq -c '.kubernetes_test' ci-matrix.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Get tool versions
+        id: tool-versions
+        run: make ci-tool-versions >> "$GITHUB_OUTPUT"
+
+  k8s-test:
+    name: k8s-test (${{ matrix.k8s-kind-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: get-test-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.get-test-matrix.outputs.matrix) }}
+    env:
+      K8S_VERSION: ${{ matrix.k8s-kind-version }}
+      KIND_CLUSTER_NAME: metrics-adapter-test
+      KUBECONFIG_TEST: /tmp/kube-config-signalfx-k8s-metrics-adapter-tests
+    steps:
+      - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: Cache go dependencies
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - name: Create Kind cluster
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-            ~/go/bin
-          key: ${{ runner.os }}-go-${{ hashFiles('go.mod', '**/go.sum') }}
+          version: ${{ needs.get-test-matrix.outputs.kind-version }}
+          node_image: kindest/node:${{ matrix.k8s-kind-version }}
+          kubectl_version: ${{ matrix.k8s-kind-version }}
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          kubeconfig: ${{ env.KUBECONFIG_TEST }}
+          wait: 180s
 
-      - name: Cache kubectl
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: /tmp/kubectl
-          key: v1-kubectl-binary-${{ matrix.K8S_VERSION }}
-
-      - name: Download kubectl
-        run: |
-          if [[ ! -e "/tmp/kubectl" ]]; then
-            wget -q -O "/tmp/kubectl" https://storage.googleapis.com/kubernetes-release/release/${{ matrix.K8S_VERSION }}/bin/linux/amd64/kubectl
-          fi
-          sudo install /tmp/kubectl /usr/local/bin/kubectl
-          sudo chmod a+x /usr/local/bin/kubectl
-
-      - name: Cache minikube
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: /tmp/minikube
-          key: v1-minikube-binary-${{ env.MINIKUBE_VERSION }}
-
-      - name: Download minikube
-        run: |
-          if [[ ! -e "/tmp/minikube" ]]; then
-            wget -q -O "/tmp/minikube" https://storage.googleapis.com/minikube/releases/${{ env.MINIKUBE_VERSION }}/minikube-linux-amd64
-          fi
-          sudo install /tmp/minikube /usr/local/bin/minikube
-          sudo chmod a+x /usr/local/bin/minikube
-          sudo sysctl fs.protected_regular=0
-
-      - name: Start Minikube
-        run: |
-          minikube start --container-runtime=docker --cpus 2 --memory 4096 --kubernetes-version=${{ matrix.K8S_VERSION }} --no-vtx-check
-          export JSONPATH='{range .items[*]}{@.metadata.name}:{range @.status.conditions[*]}{@.type}={@.status};{end}{end}'
-          until kubectl get nodes -o jsonpath="$JSONPATH" 2>&1 | grep -q "Ready=True"; do
-            sleep 1;
-          done
-
-      - name: Run test
-        run: make test
+      - name: Run integration tests
+        run: KUBECONFIG="$KUBECONFIG_TEST" make test

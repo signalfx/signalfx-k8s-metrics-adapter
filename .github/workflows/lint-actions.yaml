@@ -7,6 +7,9 @@ on:
       - '.github/actions/**'
       - '.github/actionlint.yaml'
       - 'ci_scripts/check-actions-*.sh'
+      - 'ci_scripts/install-tools.sh'
+      - 'ci-matrix.json'
+      - 'Makefile'
 
 permissions:
   contents: read
@@ -30,6 +33,9 @@ jobs:
 
       - name: Run actionlint
         run: actionlint -color
+
+      - name: Check tool installer
+        run: shellcheck ci_scripts/install-tools.sh
 
   security-checks:
     runs-on: ubuntu-latest
